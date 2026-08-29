@@ -138,8 +138,12 @@ export class SessionPersistenceQueue {
   /**
    * Immediately flush a pending session. The write path is serialized
    * inside write() itself, so callers can await this directly.
+   *
+   * @param sessionId - Session to flush. sanitizeSessionId() protects
+   *   against path traversal via a malicious session ID key.
    */
-  async flush(sessionId: string): Promise<void> {
+  async flush(rawSessionId: string): Promise<void> {
+    const sessionId = sanitizeSessionId(rawSessionId) || rawSessionId;
     const entry = this.pending.get(sessionId);
     if (!entry) return;
     clearTimeout(entry.timer);
