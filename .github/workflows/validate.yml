@@ -1,0 +1,46 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Reject Windows-illegal filenames
+        run: |
+          BAD=$(git ls-files | grep -E '[<>:"|?*]' || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::Files with characters illegal on Windows:"
+            echo "$BAD"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (strict, all packages)
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test
+        run: bun test

@@ -1,0 +1,20 @@
+{
+  "name": "@threadcove/webui",
+  "version": "0.1.0",
+  "description": "WebUI: reuses the same transport + CHANNEL_MAP, overrides only LOCAL_ONLY methods",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "vite",
+    "build": "vite build",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@threadcove/core": "workspace:*",
+    "@threadcove/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

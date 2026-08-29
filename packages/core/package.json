@@ -1,0 +1,19 @@
+{
+  "name": "@threadcove/core",
+  "version": "0.1.0",
+  "description": "Pure type layer: AgentEvent, Message, Session, Workspace",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

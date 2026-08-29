@@ -1,0 +1,26 @@
+{
+  "name": "@threadcove/electron",
+  "version": "0.1.0",
+  "description": "Desktop app: embedded WS server, transport layer, React session UI",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "dev": "bun run scripts/dev.ts",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --outfile=dist/main.cjs --external:electron --external:@anthropic-ai/claude-agent-sdk --external:@threadcove/core --external:@threadcove/shared --external:ws",
+    "build:preload": "esbuild src/preload/bootstrap.ts --bundle --platform=node --format=cjs --outfile=dist/preload.cjs --external:electron --external:@threadcove/core --external:@threadcove/shared --external:ws"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.220",
+    "@threadcove/core": "workspace:*",
+    "@threadcove/shared": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/ws": "^8.18.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}

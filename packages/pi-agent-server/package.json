@@ -1,0 +1,23 @@
+{
+  "name": "@threadcove/pi-agent-server",
+  "version": "0.1.0",
+  "description": "Out-of-process Pi agent server communicating via JSONL over stdio",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "pi-agent-server": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.6",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
