@@ -55,8 +55,12 @@ export class PiEventAdapter {
 
     switch (type) {
       case 'message_update': {
-        // Pi streams assistant message updates; extract text deltas.
-        const delta = this.extractTextDelta(rawEvent);
+        // Pi streams assistant message updates; the text delta lives on
+        // assistantMessageEvent: { type: 'text_delta', delta }.
+        const evt = rawEvent['assistantMessageEvent'] as Record<string, unknown> | undefined;
+        const delta = evt && typeof evt === 'object'
+          ? (evt['type'] === 'text_delta' && typeof evt['delta'] === 'string' ? evt['delta'] : null)
+          : this.extractTextDelta(rawEvent);
         if (delta) {
           if (!this.messageSubTurnId) {
             this.subTurnCounter += 1;
@@ -72,7 +76,8 @@ export class PiEventAdapter {
       }
 
       case 'message_end': {
-        const text = this.extractFinalText(rawEvent);
+        // message_end carries the full AgentMessage; extract text blocks.
+        const text = this.extractFinalText(rawEvent['message']);
         if (text && !this.hasEmittedFinalText) {
           this.hasEmittedFinalText = true;
           events.push({
@@ -102,7 +107,8 @@ export class PiEventAdapter {
       case 'tool_execution_end': {
         const toolUseId = String(rawEvent['toolCallId'] ?? rawEvent['id'] ?? '');
         const toolName = this.toolNames.get(toolUseId);
-        const result = this.extractToolResult(rawEvent);
+        // Pi tool results: result is a ToolResultMessage with content blocks.
+        const result = this.extractToolResult(rawEvent['result']);
         events.push({
           type: 'tool_result',
           toolUseId,
@@ -164,6 +170,7 @@ export class PiEventAdapter {
   // ============================================================
 
   private extractTextDelta(event: Record<string, unknown>): string | null {
+    // Fallback shape for older event envelopes: delta directly on the event.
     const delta = event['delta'];
     if (typeof delta === 'object' && delta !== null) {
       const d = delta as Record<string, unknown>;
@@ -175,10 +182,9 @@ export class PiEventAdapter {
     return null;
   }
 
-  private extractFinalText(event: Record<string, unknown>): string | null {
-    const message = event['message'];
-    if (typeof message !== 'object' || message === null) return null;
-    const msg = message as Record<string, unknown>;
+  private extractFinalText(event: unknown): string | null {
+    if (typeof event !== 'object' || event === null) return null;
+    const msg = event as Record<string, unknown>;
     const content = msg['content'];
     if (typeof content === 'string') return content;
     if (Array.isArray(content)) {
@@ -196,11 +202,11 @@ export class PiEventAdapter {
     return null;
   }
 
-  private extractToolResult(event: Record<string, unknown>): string {
-    const result = event['result'];
+  private extractToolResult(result: unknown): string {
     if (typeof result === 'string') return result;
     if (typeof result === 'object' && result !== null) {
       const r = result as Record<string, unknown>;
+      // Pi ToolResultMessage: { content: TextContent[] | ImageContent[], ... }
       const content = r['content'];
       if (typeof content === 'string') return content;
       if (Array.isArray(content)) {
