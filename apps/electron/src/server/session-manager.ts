@@ -17,7 +17,8 @@
 import type { AgentEvent } from '@threadcove/core/types';
 import type { WsRpcServer } from '../transport/server.ts';
 import { createBackend } from '@threadcove/shared/agent';
-import type { AgentBackend, BackendConfig, AbortReason } from '@threadcove/shared/agent';
+import type { AgentBackend, BackendConfig } from '@threadcove/shared/agent';
+import { AbortReason } from '@threadcove/shared/agent';
 import type { ModelProvider, ThinkingLevel, PermissionMode } from '@threadcove/shared/config';
 import { getContextWindowForModel } from '@threadcove/shared/config';
 import type { McpClientPool } from '@threadcove/shared/mcp';
@@ -163,7 +164,7 @@ export class SessionManager {
   }
 
   /** Force teardown (app quit / session delete). */
-  destroySession(workspaceId: string, sessionId: string, reason: AbortReason = 'internal_error' as AbortReason): void {
+  destroySession(workspaceId: string, sessionId: string, reason: AbortReason = AbortReason.InternalError): void {
     const key = this.key(workspaceId, sessionId);
     const entry = this.active.get(key);
     if (!entry) return;
