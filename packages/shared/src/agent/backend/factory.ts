@@ -15,6 +15,7 @@ import type {
 } from './types.ts';
 import { ClaudeAgent } from '../claude-agent.ts';
 import { PiAgent } from '../pi-agent.ts';
+import { DeepSeekAgent } from '../deepseek-agent.ts';
 
 // ============================================================
 // Provider drivers
@@ -43,14 +44,38 @@ const piDriver: ProviderDriver = {
   },
 };
 
+const deepseekDriver: ProviderDriver = {
+  provider: 'deepseek',
+  buildRuntime(config) {
+    return {
+      inProcess: true,
+      transport: 'openai-compat-sse',
+      model: config.model,
+      cwd: config.workingDirectory,
+    };
+  },
+  async fetchModels() {
+    // DeepSeek exposes its model list on /v1/models; static registry
+    // covers the known ids, this hook is the dynamic path.
+    const response = await fetch('https://api.deepseek.com/v1/models', {
+      headers: { Authorization: `Bearer ${process.env['DEEPSEEK_API_KEY'] ?? ''}` },
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { data?: Array<{ id: string }> };
+    return (data.data ?? []).map((m) => m.id);
+  },
+};
+
 export const DRIVER_REGISTRY: Record<ModelProvider, ProviderDriver> = {
   anthropic: anthropicDriver,
   pi: piDriver,
+  deepseek: deepseekDriver,
 };
 
 const BACKEND_FACTORIES: Record<ModelProvider, BackendFactory> = {
   anthropic: (config) => new ClaudeAgent(config),
   pi: (config) => new PiAgent(config),
+  deepseek: (config) => new DeepSeekAgent(config),
 };
 
 export function getProviderDriver(provider: ModelProvider): ProviderDriver {
@@ -78,5 +103,5 @@ export function createBackend(config: BackendConfig): AgentBackend {
   return factory(config);
 }
 
-export { ClaudeAgent, PiAgent };
+export { ClaudeAgent, PiAgent, DeepSeekAgent };
 export type { AgentBackend, BackendConfig };

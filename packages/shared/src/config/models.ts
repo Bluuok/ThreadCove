@@ -40,9 +40,10 @@ export function getCredentialsFilePath(): string {
 
 /**
  * Provider identifier for AI backends.
- * 'anthropic' → in-process Claude SDK; 'pi' → out-of-process Pi JSONL server.
+ * 'anthropic' → in-process Claude SDK; 'pi' → out-of-process Pi JSONL server;
+ * 'deepseek' → in-process OpenAI-compatible streaming client.
  */
-export type ModelProvider = 'anthropic' | 'pi';
+export type ModelProvider = 'anthropic' | 'pi' | 'deepseek';
 
 // ============================================================
 // Model registry
@@ -72,6 +73,7 @@ export interface ModelDefinition {
 export const DEFAULT_MODELS: Record<ModelProvider, string> = {
   anthropic: 'claude-sonnet-4-6',
   pi: 'claude-sonnet-4-6',
+  deepseek: 'deepseek-v4-flash',
 };
 
 /**
@@ -102,6 +104,20 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     contextWindow: 200_000,
     supportsThinking: true,
     supportsImages: true,
+  },
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek V4 Flash',
+    provider: 'deepseek',
+    contextWindow: 128_000,
+    supportsThinking: true,
+  },
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
+    provider: 'deepseek',
+    contextWindow: 128_000,
+    supportsThinking: true,
   },
 ];
 
