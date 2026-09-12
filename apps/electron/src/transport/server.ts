@@ -19,7 +19,6 @@ import {
   type HandlerFn,
   type MessageEnvelope,
   type PushTarget,
-  type RequestContext,
   type RpcServer,
 } from '@threadcove/shared/protocol';
 import { serializeEnvelope, deserializeEnvelope, CodedError } from '@threadcove/shared/protocol';
@@ -46,6 +45,8 @@ interface PendingInvoke {
 // ---------------------------------------------------------------------------
 
 export interface WsRpcServerOptions {
+  allowedOrigins?: string[];
+  workspaceId?: string;
   /** Host to bind to. Default: '127.0.0.1' */
   host?: string;
   /** Port to bind to. 0 = random available port. Default: 0 */
@@ -65,6 +66,7 @@ export interface WsRpcServerOptions {
 // ---------------------------------------------------------------------------
 
 export class WsRpcServer implements RpcServer {
+  private options: WsRpcServerOptions;
   private wss: WebSocketServer | null = null;
   private httpServer: HttpServer | null = null;
   private clients = new Map<string, ClientConnection>();
@@ -79,6 +81,8 @@ export class WsRpcServer implements RpcServer {
   private readonly onClientDisconnected: WsRpcServerOptions['onClientDisconnected'];
 
   constructor(opts?: WsRpcServerOptions) {
+    this.options = opts ?? {};
+    if (opts?.requireAuth && !opts.validateToken) throw new Error('Authentication requires a token validator');
     this.host = opts?.host ?? '127.0.0.1';
     this.requestedPort = opts?.port ?? 0;
     this.requireAuth = opts?.requireAuth ?? false;
@@ -112,7 +116,9 @@ export class WsRpcServer implements RpcServer {
       res.writeHead(426).end('Upgrade Required');
     });
 
-    this.wss = new WebSocketServer({ server: this.httpServer });
+    this.wss = new WebSocketServer({ server: this.httpServer, maxPayload: 2 * 1024 * 1024,
+      verifyClient: ({ origin }: { origin: string }) => !origin || (this.options.allowedOrigins ?? []).includes(origin),
+    });
     this.wss.on('connection', (ws) => this.handleConnection(ws));
 
     await new Promise<void>((resolve, reject) => {
@@ -122,9 +128,7 @@ export class WsRpcServer implements RpcServer {
   }
 
   async stop(): Promise<void> {
-    for (const client of this.clients.values()) {
-      client.ws.close(1001, 'server shutdown');
-    }
+    for (const client of this.wss?.clients ?? []) client.terminate();
     this.clients.clear();
     for (const pending of this.pendingInvokes.values()) {
       clearTimeout(pending.timeout);
@@ -208,6 +212,8 @@ export class WsRpcServer implements RpcServer {
 
   private handleConnection(ws: WebSocket): void {
     let clientId: string | null = null;
+    let handshaking = false;
+    const deadline = setTimeout(() => ws.terminate(), 10_000);
 
     ws.on('message', (data) => {
       let envelope: MessageEnvelope;
@@ -224,6 +230,7 @@ export class WsRpcServer implements RpcServer {
 
       // Before handshake, only 'handshake' is accepted.
       if (!clientId) {
+        if (handshaking) return;
         if (envelope.type !== 'handshake') {
           this.safeSend(ws, {
             id: envelope.id,
@@ -232,9 +239,10 @@ export class WsRpcServer implements RpcServer {
           });
           return;
         }
+        handshaking = true;
         void this.handleHandshake(ws, envelope).then((id) => {
-          if (id) clientId = id;
-        });
+          if (id) { clientId = id; clearTimeout(deadline); }
+        }).catch(() => ws.close(1008, 'handshake failed'));
         return;
       }
 
@@ -242,6 +250,7 @@ export class WsRpcServer implements RpcServer {
     });
 
     ws.on('close', () => {
+      clearTimeout(deadline);
       if (clientId) {
         this.clients.delete(clientId);
         this.onClientDisconnected?.(clientId);
@@ -288,10 +297,13 @@ export class WsRpcServer implements RpcServer {
     }
 
     const clientId = randomUUID();
+    const workspaceId = envelope.workspaceId ?? this.options.workspaceId;
+    if (this.options.workspaceId && workspaceId !== this.options.workspaceId) { ws.close(1008, 'workspace denied'); return null; }
+    if (ws.readyState !== 1) return null;
     const client: ClientConnection = {
       id: clientId,
       ws,
-      workspaceId: typeof envelope.workspaceId === 'string' ? envelope.workspaceId : null,
+      workspaceId: typeof workspaceId === 'string' ? workspaceId : null,
       capabilities: new Set(clientCapabilities),
     };
     this.clients.set(clientId, client);
@@ -341,10 +353,11 @@ export class WsRpcServer implements RpcServer {
       return;
     }
 
-    const ctx: RequestContext = { clientId: client.id, workspaceId: client.workspaceId };
     try {
+      if (/^(sessions|sources|files|workspaces):/.test(channel) && (!client.workspaceId || envelope.args?.[0] !== client.workspaceId)) {
+        throw new CodedError('AUTH_FAILED', 'Workspace does not match the authenticated connection');
+      }
       const result = await handler(...(envelope.args ?? []));
-      void ctx; // reserved for per-request context passed to handlers
       this.safeSend(client.ws, {
         id: envelope.id,
         type: 'response',

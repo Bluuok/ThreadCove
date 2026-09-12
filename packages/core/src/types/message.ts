@@ -177,9 +177,10 @@ export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'info'; message: string; infoLevel?: 'info' | 'warning' | 'error' | 'success' }
   // 1. Text deltas
-  | { type: 'text_delta'; text: string; turnId?: string; parentToolUseId?: string }
+  | { type: 'text_delta'; text: string; messageId?: string; textSnapshot?: string; turnId?: string; parentToolUseId?: string }
   | {
       type: 'text_complete';
+      messageId?: string;
       text: string;
       isIntermediate?: boolean;
       turnId?: string;
@@ -273,6 +274,8 @@ export interface Message {
  * Excludes transient runtime-only fields (isStreaming, isPending).
  */
 export interface StoredMessage {
+  requestId?: string;
+  runId?: string;
   id: string;
   type: MessageRole;
   content: string;

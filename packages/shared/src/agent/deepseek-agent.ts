@@ -10,7 +10,8 @@
  * steering, so redirect() follows the forceAbort+queue branch.
  */
 
-import type { AgentEvent } from '@threadcove/core/types';
+import type { AgentEvent, StoredMessage } from '@threadcove/core/types';
+import { EventQueue } from './backend/event-queue.ts';
 import { BaseAgent } from './backend/base-agent.ts';
 import { AbortReason } from './backend/types.ts';
 import type { BackendConfig } from './backend/types.ts';
@@ -61,26 +62,26 @@ export class DeepSeekAgent extends BaseAgent {
     }
 
     const turnId = `ds-${Date.now()}`;
-    this.abortController = new AbortController();
+    const controller = new AbortController();
+    this.abortController = controller;
     this.conversation.push({ role: 'user', content: message });
-
+    const queue = new EventQueue();
+    let partial = '';
+    const request = this.client.stream(
+      [{ role: 'system', content: this.systemPrompt() }, ...this.conversation],
+      { onTextDelta: text => { if (!controller.signal.aborted) { partial += text; queue.enqueue({ type: 'text_delta', text, turnId }); } } },
+      { signal: controller.signal, model: this._model },
+    );
+    // Attach rejection handling immediately; the consumer may pause between deltas.
+    let failure: unknown;
+    let result: Awaited<typeof request> | undefined;
+    const settled = request.then(value => { result = value; }, error => { failure = error; }).finally(() => queue.complete());
     try {
-      const result = await this.client.stream(
-        [{ role: 'system', content: this.systemPrompt() }, ...this.conversation],
-        {
-          onTextDelta: (text) => {
-            // Deltas surface through the queue below; collected here.
-            void text;
-          },
-        },
-      );
-
-      // The SSE client is promise-based; emit one turn-shaped event set.
-      // Streaming granularity is preserved by re-emitting the text in
-      // chunks so the UI contract (delta → complete) stays exercised.
-      for (const chunk of chunkText(result.content)) {
-        yield { type: 'text_delta', text: chunk, turnId };
-      }
+      for await (const event of queue.drain()) { if (controller.signal.aborted) break; yield event; }
+      await settled;
+      if (controller.signal.aborted) return;
+      if (failure) throw failure;
+      if (!result) throw new Error('Empty stream result');
       if (result.content) {
         yield { type: 'text_complete', text: result.content, turnId };
         this.conversation.push({ role: 'assistant', content: result.content });
@@ -96,7 +97,7 @@ export class DeepSeekAgent extends BaseAgent {
           : undefined,
       };
     } catch (err) {
-      if (this.lastAbortReason !== null) {
+      if (controller.signal.aborted) {
         this.debug(`stream ended after abort`);
       } else {
         yield {
@@ -112,6 +113,9 @@ export class DeepSeekAgent extends BaseAgent {
         };
       }
     } finally {
+      controller.abort();
+      await settled;
+      if (partial && this.conversation.at(-1)?.role !== 'assistant') this.conversation.push({ role: 'assistant', content: partial });
       this.abortController = null;
     }
   }
@@ -172,6 +176,7 @@ export class DeepSeekAgent extends BaseAgent {
           { role: 'user', content: prompt },
         ],
         512,
+        { model: this._model },
       );
       return result.content || null;
     } catch (err) {
@@ -200,16 +205,22 @@ export class DeepSeekAgent extends BaseAgent {
     this.forceAbortImpl(AbortReason.InternalError);
   }
 
+  restoreHistory(messages: StoredMessage[]): void {
+    if (this._processing) throw new Error('Cannot restore history while processing');
+    // Bound restored history conservatively in characters, preserving the newest context.
+    let remaining = 48_000;
+    const history: ChatMessage[] = [];
+    for (const message of [...messages].reverse()) {
+      if (message.type !== 'user' && message.type !== 'assistant') continue;
+      const content = message.content.slice(-remaining);
+      if (content) history.unshift({ role: message.type, content });
+      remaining -= content.length;
+      if (remaining <= 0) break;
+    }
+    this.conversation = history;
+  }
+
   respondToPermission(_requestId: string, _allowed: boolean, _alwaysAllow?: boolean): void {
     this.debug('respondToPermission: no pending permission request');
   }
-}
-
-/** Split text into small chunks for delta-shaped streaming events. */
-function chunkText(text: string, size = 12): string[] {
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += size) {
-    chunks.push(text.slice(i, i + size));
-  }
-  return chunks;
 }

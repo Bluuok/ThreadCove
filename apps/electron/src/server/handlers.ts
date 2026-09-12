@@ -10,22 +10,24 @@
 
 import { RPC_CHANNELS } from '@threadcove/shared/protocol';
 import type { RpcServer as RpcServerLike } from '@threadcove/shared/protocol';
-import type { StoredSession, StoredMessage, AgentEvent } from '@threadcove/core/types';
+import type { StoredSession } from '@threadcove/core/types';
 import {
   createSession,
-  deleteSession,
+  deleteSessionSafely,
   archiveSession,
   flagSession,
-  appendMessages,
   loadSession,
   loadSessionHeader,
   listSessionHeaders,
   resolveWorkingDirectory,
-  getSessionPath,
+  resolveSessionFilePath,
+  updateSessionConfig,
+  validateSessionId,
 } from '@threadcove/shared/sessions';
 import { listSources } from '@threadcove/shared/sources';
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
+import type { ModelProvider } from '@threadcove/shared/config';
 import type { SessionManager } from './session-manager.ts';
 
 export interface HandlerContext {
@@ -40,13 +42,13 @@ export interface HandlerContext {
   ) => void;
   modelProvider: () => ModelProviderChoice;
   model: () => string;
-  apiKey: () => string | undefined;
+  apiKey: (provider?: ModelProvider) => string | undefined;
   /** Whether this server instance supports LOCAL_ONLY channels. */
   isLocal: boolean;
 }
 
 export interface ModelProviderChoice {
-  provider: 'anthropic' | 'pi';
+  provider: ModelProvider;
   model?: string;
   thinkingLevel?: string;
   permissionMode?: 'safe' | 'ask' | 'allow-all';
@@ -64,17 +66,19 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
   // ============================================================
 
   server.handle(RPC_CHANNELS.server.GET_STATUS, () => {
-    return { version: '0.1.0', workspaceCount: 1 };
+    return { version: '0.1.0', workspaceCount: ctx.sessionManager.listWorkspaces().length };
   });
 
   // ============================================================
+  server.handle(RPC_CHANNELS.server.GET_WORKSPACES, () => ctx.sessionManager.listWorkspaces());
+
   // Sessions (REMOTE_ELIGIBLE — workspace content)
   // ============================================================
 
   server.handle(RPC_CHANNELS.sessions.GET, (...args: unknown[]) => {
     const [workspaceId, includeArchived] = args as [string, boolean | undefined];
     const root = requireRoot(ctx, workspaceId);
-    return listSessionHeaders(root, includeArchived === true);
+    return listSessionHeaders(root, includeArchived === true).map(session => ({ ...session, isProcessing: ctx.sessionManager.isProcessing(String(workspaceId), session.id) }));
   });
 
   server.handle(RPC_CHANNELS.sessions.CREATE, async (...args: unknown[]) => {
@@ -104,54 +108,22 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
   });
 
   server.handle(RPC_CHANNELS.sessions.SEND_MESSAGE, async (...args: unknown[]) => {
-    const [workspaceId, sessionId, message] = args as [string, string, string];
+    const [workspaceId, sessionId, message, suppliedRequestId] = args as [string, string, string, string | undefined];
     const root = requireRoot(ctx, workspaceId);
-
-    // Ensure the manager has a backend (e.g., after server restart).
-    if (!ctx.sessionManager.getSession(String(workspaceId), String(sessionId))) {
-      const session = loadSession(root, String(sessionId));
-      if (!session) throw new Error(`Session not found: ${sessionId}`);
-      ctx.sessionManager.createSession({
-        workspaceId: String(workspaceId),
-        sessionId: String(sessionId),
-        provider: (session.provider as 'anthropic' | 'pi') ?? ctx.modelProvider().provider,
-        model: session.model ?? ctx.model(),
-        workingDirectory: resolveWorkingDirectory(session),
-        apiKey: ctx.apiKey(),
-      });
+    validateSessionId(sessionId);
+    if (typeof message !== 'string' || !message.trim() || message.length > 200_000) throw new Error('Message must contain 1–200000 characters');
+    const requestId = suppliedRequestId ?? crypto.randomUUID();
+    if (typeof requestId !== 'string' || !/^[\w-]{1,128}$/.test(requestId)) throw new Error('Invalid request ID');
+    if (!ctx.sessionManager.getSession(workspaceId, sessionId)) {
+      const session = loadSession(root, sessionId);
+      if (!session) throw new Error('Session not found');
+      const provider = (session.provider ?? ctx.modelProvider().provider) as ModelProvider;
+      ctx.sessionManager.createSession({ workspaceId, sessionId, provider, model: session.model ?? ctx.model(),
+        workingDirectory: resolveWorkingDirectory(session), apiKey: ctx.apiKey(provider), history: session.messages });
     }
-
-    const userMessage: StoredMessage = {
-      id: `msg-${Date.now()}`,
-      type: 'user',
-      content: String(message),
-      timestamp: Date.now(),
-    };
-    await appendMessages(root, String(sessionId), [userMessage]);
-
-    // Persist the user message broadcast shape too.
-    ctx.broadcast({ to: 'all' }, RPC_CHANNELS.session.EVENT, {
-      sessionId: String(sessionId),
-      event: { type: 'user_message', message: userMessage },
+    return ctx.sessionManager.submitMessage({ workspaceId, sessionId, message, requestId,
+      broadcast: event => ctx.broadcast({ to: 'workspace', workspaceId }, RPC_CHANNELS.session.EVENT, { workspaceId, sessionId, event }),
     });
-
-    const events = await ctx.sessionManager.sendMessage({
-      workspaceId: String(workspaceId),
-      sessionId: String(sessionId),
-      message: String(message),
-      broadcast: (event) =>
-        ctx.broadcast({ to: 'all' }, RPC_CHANNELS.session.EVENT, {
-          sessionId: String(sessionId),
-          event,
-        }),
-    });
-
-    // Persist assistant-visible events as messages (parity fields).
-    const stored = eventToStoredMessages(events);
-    if (stored.length > 0) {
-      await appendMessages(root, String(sessionId), stored);
-    }
-    return { accepted: true };
   });
 
   server.handle(RPC_CHANNELS.sessions.CANCEL, (...args: unknown[]) => {
@@ -161,11 +133,16 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
       .then(() => ({ success: true }));
   });
 
-  server.handle(RPC_CHANNELS.sessions.DELETE, (...args: unknown[]) => {
+  server.handle(RPC_CHANNELS.sessions.DELETE, async (...args: unknown[]) => {
     const [workspaceId, sessionId] = args as [string, string];
     const root = requireRoot(ctx, workspaceId);
-    ctx.sessionManager.destroySession(String(workspaceId), String(sessionId));
-    return { success: deleteSession(root, String(sessionId)) };
+    await ctx.sessionManager.cancel(String(workspaceId), String(sessionId));
+    await ctx.sessionManager.waitForIdle(String(workspaceId), String(sessionId));
+    return ctx.sessionManager.withIdleSession(String(workspaceId), String(sessionId), async () => {
+      const success = await deleteSessionSafely(root, String(sessionId));
+      ctx.sessionManager.destroySession(String(workspaceId), String(sessionId));
+      return { success };
+    });
   });
 
   server.handle(RPC_CHANNELS.sessions.ARCHIVE, async (...args: unknown[]) => {
@@ -182,15 +159,21 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
 
   server.handle(RPC_CHANNELS.sessions.GET_MODEL, (...args: unknown[]) => {
     const [workspaceId, sessionId] = args as [string, string];
-    const backend = ctx.sessionManager.getSession(String(workspaceId), String(sessionId));
-    return { model: backend?.getModel() ?? ctx.model() };
+    const session = loadSession(requireRoot(ctx, workspaceId), sessionId);
+    if (!session) throw new Error('Session not found');
+    return { model: session.model ?? ctx.model() };
   });
 
-  server.handle(RPC_CHANNELS.sessions.SET_MODEL, (...args: unknown[]) => {
+  server.handle(RPC_CHANNELS.sessions.SET_MODEL, async (...args: unknown[]) => {
     const [workspaceId, sessionId, model] = args as [string, string, string];
-    const backend = ctx.sessionManager.getSession(String(workspaceId), String(sessionId));
-    backend?.setModel(String(model));
-    return { success: true };
+    const root = requireRoot(ctx, workspaceId);
+    if (typeof model !== 'string' || !model.trim() || model.length > 200) throw new Error('Invalid model');
+    return ctx.sessionManager.withIdleSession(workspaceId, sessionId, async () => {
+      const saved = await updateSessionConfig(root, sessionId, { model });
+      if (!saved) throw new Error('Session not found');
+      ctx.sessionManager.getSession(workspaceId, sessionId)?.setModel(model);
+      return { success: true };
+    });
   });
 
   server.handle(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, (...args: unknown[]) => {
@@ -223,9 +206,9 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
     const [workspaceId, sessionId, subPath] = args as [string, string, string | undefined];
     const root = requireRoot(ctx, workspaceId);
     // getSessionPath imported at module top (defense-in-depth sanitize inside)
-    const dir = join(getSessionPath(root, String(sessionId)), String(subPath ?? ''));
+    const dir = resolveSessionFilePath(root, String(sessionId), String(subPath ?? ''));
     if (!existsSync(dir)) return { entries: [] };
-    const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
+    const entries = readdirSync(dir, { withFileTypes: true }).filter(e => !e.isSymbolicLink()).map((e) => {
       const full = join(dir, e.name);
       return {
         name: e.name,
@@ -240,7 +223,7 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
     const [workspaceId, sessionId, subPath] = args as [string, string, string];
     const root = requireRoot(ctx, workspaceId);
     // getSessionPath imported at module top (defense-in-depth sanitize inside)
-    const file = join(getSessionPath(root, String(sessionId)), String(subPath));
+    const file = resolveSessionFilePath(root, String(sessionId), String(subPath));
     if (!existsSync(file)) throw new Error(`File not found: ${String(subPath)}`);
     return { content: readFileSync(file, 'utf-8') };
   });
@@ -249,65 +232,8 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
     const [workspaceId, sessionId, subPath, content] = args as [string, string, string, string];
     const root = requireRoot(ctx, workspaceId);
     // getSessionPath imported at module top (defense-in-depth sanitize inside)
-    const file = join(getSessionPath(root, String(sessionId)), String(subPath));
+    const file = resolveSessionFilePath(root, String(sessionId), String(subPath));
     writeFileSync(file, String(content), 'utf-8');
     return { success: true };
   });
-}
-
-/**
- * Map AgentEvents to StoredMessages for persistence.
- * Field-for-field parity with the renderer's mapping is locked by the
- * session-event-message parity test.
- */
-function eventToStoredMessages(events: AgentEvent[]): StoredMessage[] {
-  const messages: StoredMessage[] = [];
-  for (const event of events) {
-    switch (event.type) {
-      case 'text_complete':
-        if (!event.isIntermediate) {
-          messages.push({
-            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            type: 'assistant',
-            content: event.text,
-            timestamp: Date.now(),
-            turnId: event.turnId,
-            parentToolUseId: event.parentToolUseId,
-          });
-        }
-        break;
-      case 'tool_result':
-        messages.push({
-          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          type: 'tool',
-          content: event.result,
-          timestamp: Date.now(),
-          toolName: event.toolName,
-          toolUseId: event.toolUseId,
-          isError: event.isError,
-          turnId: event.turnId,
-          parentToolUseId: event.parentToolUseId,
-        });
-        break;
-      case 'typed_error':
-        messages.push({
-          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          type: 'error',
-          content: event.error.message,
-          timestamp: Date.now(),
-          errorCode: event.error.code,
-          errorTitle: event.error.title,
-          errorDetails: event.error.details,
-          errorOriginal: event.error.originalError,
-          errorCanRetry: event.error.canRetry,
-          errorActions: event.error.actions,
-          turnId: event.turnId,
-        });
-        break;
-      default:
-        // status/info/usage deltas are transient — not persisted.
-        break;
-    }
-  }
-  return messages;
 }

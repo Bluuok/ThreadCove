@@ -96,6 +96,7 @@ describe('R12 end-to-end: server stack + client over real WebSocket', () => {
   });
 
   afterAll(async () => {
+    await sessionManager.shutdown();
     await server.stop();
     // Windows: give any pending file handles a beat before cleanup.
     await new Promise((r) => setTimeout(r, 200));
@@ -108,7 +109,7 @@ describe('R12 end-to-end: server stack + client over real WebSocket', () => {
   });
 
   function connect(): { client: WsRpcClient; api: ReturnType<typeof buildClientApi>; events: SessionEvent[] } {
-    const client = new WsRpcClient(`ws://127.0.0.1:${server.port}`, { autoReconnect: false });
+    const client = new WsRpcClient(`ws://127.0.0.1:${server.port}`, { autoReconnect: false, workspaceId: ws.config.id });
     const events: SessionEvent[] = [];
     const api = buildClientApi(client, CHANNEL_MAP) as ReturnType<typeof buildClientApi> & {
       onSessionEvent: (cb: (e: SessionEvent) => void) => void;

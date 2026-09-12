@@ -12,7 +12,10 @@
   },
   "dependencies": {
     "@threadcove/core": "workspace:*",
-    "@threadcove/shared": "workspace:*"
+    "@threadcove/shared": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@threadcove/ui": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

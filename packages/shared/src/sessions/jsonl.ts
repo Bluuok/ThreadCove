@@ -149,13 +149,11 @@ export function writeSessionJsonl(sessionFile: string, session: StoredSession): 
 
   const tmpFile = sessionFile + '.tmp';
   writeFileSync(tmpFile, lines.join('\n') + '\n');
-  // Windows rename fails if target exists — delete first.
   try {
-    unlinkSync(sessionFile);
-  } catch {
-    /* ignore if doesn't exist */
+    renameSync(tmpFile, sessionFile);
+  } finally {
+    try { unlinkSync(tmpFile); } catch { /* renamed or absent */ }
   }
-  renameSync(tmpFile, sessionFile);
 }
 
 /**

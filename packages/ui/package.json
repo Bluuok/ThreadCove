@@ -1,0 +1,17 @@
+{
+  "name": "@threadcove/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/Workbench.tsx"
+  },
+  "dependencies": {
+    "@threadcove/core": "workspace:*",
+    "@threadcove/shared": "workspace:*",
+    "react": "^18.3.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -30,7 +30,7 @@ describe('WsRpcServer / WsRpcClient', () => {
     // Duplicate registration throws.
     expect(() => server.handle(RPC_CHANNELS.sessions.GET, () => null)).toThrow(/already registered/);
 
-    const client = new WsRpcClient(serverUrl, { autoReconnect: false });
+    const client = new WsRpcClient(serverUrl, { autoReconnect: false, workspaceId: 'ws-1' });
     client.connect();
     await new Promise<void>((resolve) => {
       const un = client.onConnectionStateChanged((s) => {

@@ -127,6 +127,14 @@ export class PiAgent extends BaseAgent {
       env: { ...process.env },
     });
     this.subprocess = child;
+    const onPipeError = (error: Error) => {
+      if (!this.destroyed) this.eventQueue.enqueue({ type: 'error', message: error.message });
+      this.readyResolve?.();
+      this.readyResolve = null;
+      this.eventQueue.complete();
+    };
+    child.on('error', onPipeError);
+    child.stdin?.on('error', onPipeError);
 
     child.stderr?.on('data', (data: Buffer) => {
       this.debug(`child stderr: ${data.toString().slice(0, 200)}`);
@@ -245,7 +253,9 @@ export class PiAgent extends BaseAgent {
       this.debug('cannot send to child: stdin not writable');
       return;
     }
-    this.subprocess.stdin.write(JSON.stringify(cmd) + '\n');
+    this.subprocess.stdin.write(JSON.stringify(cmd) + '\n', error => {
+      if (error && !this.destroyed) { this.eventQueue.enqueue({ type: 'error', message: error.message }); this.eventQueue.complete(); }
+    });
   }
 
   // ============================================================
@@ -341,7 +351,7 @@ export class PiAgent extends BaseAgent {
   destroy(): void {
     this.destroyed = true;
     if (this.subprocess) {
-      this.send({ type: 'shutdown' });
+      // Killing immediately after an async shutdown write races stdin on Windows.
       this.subprocess.kill();
       this.subprocess = null;
     }

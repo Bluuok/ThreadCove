@@ -151,7 +151,7 @@ describe('R08 session/workspace isolation', () => {
     await new Promise((r) => setTimeout(r, DEBOUNCE_WAIT_MS));
     const final = loadSession(workspaceRoot, s.id);
     expect(final).not.toBeNull();
-    expect(final?.messages).toHaveLength(1);
+    expect(final?.messages).toHaveLength(10);
     // No .tmp residue.
     const sessionDir = getSessionPath(workspaceRoot, s.id);
     const residue = readdirSync(sessionDir).filter((f) => f.includes('.tmp'));

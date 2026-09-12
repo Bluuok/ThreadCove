@@ -42,16 +42,18 @@ export interface OpenAICompatOptions {
   signal?: AbortSignal;
 }
 
+export interface RequestOptions { signal?: AbortSignal; model?: string }
+
 export class OpenAICompatClient {
   constructor(private readonly options: OpenAICompatOptions) {}
 
   /** Non-streaming completion (mini completions, titles). */
-  async complete(messages: ChatMessage[], maxTokens?: number): Promise<ChatCompletionResult> {
+  async complete(messages: ChatMessage[], maxTokens?: number, request: RequestOptions = {}): Promise<ChatCompletionResult> {
     const response = await fetch(`${this.options.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
-      body: JSON.stringify({ model: this.options.model, messages, max_tokens: maxTokens }),
-      signal: this.options.signal,
+      body: JSON.stringify({ model: request.model ?? this.options.model, messages, max_tokens: maxTokens }),
+      signal: request.signal ?? this.options.signal,
     });
     if (!response.ok) {
       throw new Error(`LLM API ${response.status}: ${(await response.text()).slice(0, 300)}`);
@@ -79,17 +81,17 @@ export class OpenAICompatClient {
    * Streaming completion. Returns the full result while invoking
    * callbacks per delta.
    */
-  async stream(messages: ChatMessage[], callbacks: StreamCallbacks): Promise<ChatCompletionResult> {
+  async stream(messages: ChatMessage[], callbacks: StreamCallbacks, request: RequestOptions = {}): Promise<ChatCompletionResult> {
     const response = await fetch(`${this.options.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({
-        model: this.options.model,
+        model: request.model ?? this.options.model,
         messages,
         stream: true,
         stream_options: { include_usage: true },
       }),
-      signal: this.options.signal,
+      signal: request.signal ?? this.options.signal,
     });
     if (!response.ok) {
       throw new Error(`LLM API ${response.status}: ${(await response.text()).slice(0, 300)}`);
@@ -105,7 +107,7 @@ export class OpenAICompatClient {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
+    try { while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -121,7 +123,7 @@ export class OpenAICompatClient {
           .find((line) => line.startsWith('data:'));
         if (!dataLine) continue;
         const payload = dataLine.slice(5).trim();
-        if (payload === '[DONE]') continue;
+        if (payload === '[DONE]') return { content, reasoning: reasoning || undefined, usage, finishReason };
 
         try {
           const chunk = JSON.parse(payload) as {
@@ -147,11 +149,11 @@ export class OpenAICompatClient {
               totalTokens: chunk.usage.total_tokens,
             };
           }
-        } catch {
-          // Malformed chunk — skip, keep the stream alive.
-        }
+        } catch (error) { throw new Error('Invalid SSE data', { cause: error }); }
       }
-    }
+    } } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+
+    if (!finishReason) throw new Error('Stream ended before completion');
 
     return { content, reasoning: reasoning || undefined, usage, finishReason };
   }
