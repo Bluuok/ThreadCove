@@ -1,0 +1,33 @@
+// Node is required for Playwright on Windows. Invoked with ephemeral auth over stdin.
+const { chromium, _electron } = require('playwright');
+const { resolve, join } = require('node:path');
+const { readFileSync } = require('node:fs');
+const options = JSON.parse(readFileSync(0, 'utf8'));
+let browser, desktopApp;
+(async () => {
+  const faults = [];
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  page.on('pageerror', error => faults.push(error.message));
+  await page.goto(`${options.origin}/#server=${encodeURIComponent(options.server)}&token=${encodeURIComponent(options.token)}`);
+  await page.getByRole('textbox', { name: '研究问题' }).fill('请实际调用 delegate_research 一次，同时委派两个独立子任务：一、使用 web_search 搜索 Pi coding agent SDK 的官方文档，简述 createAgentSession 的作用并附来源；二、使用 web_fetch 读取 https://api-docs.deepseek.com/guides/tool_calls/ ，简述模型与应用在工具调用中的分工并附来源。每项不超过120字。收到两个子报告后用中文简要汇总，不要再委派或自行搜索。');
+  await page.getByRole('button', { name: '开始研究' }).click();
+  await page.getByRole('button', { name: '停止', exact: true }).waitFor({ timeout: 15_000 });
+  await page.getByRole('button', { name: '开始研究' }).waitFor({ timeout: 200_000 });
+  await page.getByText('Status: completed', { exact: false }).first().waitFor({ timeout: 10_000 });
+  await page.screenshot({ path: join(options.output, 'live-research-web.png'), animations: 'disabled', fullPage: true });
+  await page.reload();
+  await page.getByText('Status: completed', { exact: false }).first().waitFor({ timeout: 15_000 });
+  console.log(JSON.stringify({ stage: 'web', delegation: true, reload: true }));
+  const env = { ...process.env, THREADCOVE_WORKSPACE: options.desktopRoot }; delete env.ELECTRON_RUN_AS_NODE;
+  desktopApp = await _electron.launch({ executablePath: require('electron'), args: [resolve('apps/electron')], env, timeout: 30_000 });
+  const desktop = await desktopApp.firstWindow(); desktop.on('pageerror', error => faults.push(error.message));
+  await desktop.getByRole('textbox', { name: '研究问题' }).fill('使用 web_search 一次搜索 Pi coding agent 官方 SDK 文档，给出一个实际搜索到的官方来源链接和一句中文说明。');
+  await desktop.getByRole('button', { name: '开始研究' }).click();
+  await desktop.getByRole('button', { name: '停止', exact: true }).waitFor({ timeout: 15_000 });
+  await desktop.getByRole('button', { name: '开始研究' }).waitFor({ timeout: 100_000 });
+  await desktop.getByText('Saved artifact: research-search-', { exact: false }).first().waitFor({ timeout: 10_000 });
+  await desktop.screenshot({ path: join(options.output, 'live-research-electron.png'), animations: 'disabled' });
+  if (faults.length) throw new Error(faults.join('\n'));
+  console.log(JSON.stringify({ stage: 'electron', search: true, pageErrors: 0 }));
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { await desktopApp?.close(); await browser?.close(); });
