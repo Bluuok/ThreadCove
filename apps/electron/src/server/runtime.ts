@@ -8,6 +8,7 @@ import { DEFAULT_MODELS } from '@threadcove/shared/config';
 import type { ModelProvider } from '@threadcove/shared/config';
 import { sessionPersistenceQueue } from '@threadcove/shared/sessions';
 import { loadOpenCodeGoKey, OPENCODE_GO_MODEL } from '../../../../packages/shared/src/config/opencode-go.ts';
+import { ResearchTools } from '@threadcove/shared/research';
 
 export function resolveProviderConfig(env: NodeJS.ProcessEnv = process.env, readGoKey = loadOpenCodeGoKey) {
   const goKey = env['OPENCODE_GO_API_KEY']?.trim() || ((!env['THREADCOVE_PROVIDER'] || (env['THREADCOVE_PROVIDER'] === 'pi' && env['THREADCOVE_PI_PROVIDER'] === 'opencode-go')) ? readGoKey() : undefined);
@@ -34,7 +35,7 @@ export async function startRuntime(options: { root: string; port?: number; token
   const workspaceId = workspace.config.id;
   const server = new WsRpcServer({ host: '127.0.0.1', port: options.port ?? 0, requireAuth: true,
     validateToken: value => value === token, workspaceId, allowedOrigins: options.origins ?? [] });
-  const manager = new SessionManager(server, id => id === workspaceId ? root : null);
+  const manager = new SessionManager(server, id => id === workspaceId ? root : null, null, undefined, new ResearchTools());
   manager.registerWorkspace(workspaceId, root);
   await manager.recoverWorkspace(root);
   registerHandlers(server, { getWorkspaceRoot: id => id === workspaceId ? root : null, sessionManager: manager,

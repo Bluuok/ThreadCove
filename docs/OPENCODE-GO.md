@@ -42,6 +42,6 @@ bun scripts/verify-opencode-go.ts
 ## 能力边界
 
 - [Pi 官方模型信息](https://pi.dev/models/opencode-go/deepseek-v4-1-flash) 标注上下文为 1,000,000 tokens；模型配置按此填写。短请求成功不代表已经实测完整 1M 窗口。
-- API 负责模型推理，搜索和子 Agent 需要应用注册相应工具及调度逻辑。它们不会因填写模型名自动出现。
-- 默认不启用 Pi 的文件、Shell 或自动发现的扩展工具。宿主代理工具通过显式注册接入；真实检查中的测试工具不等同于搜索服务已经接好。
+- API 负责模型推理；应用现已注册搜索、公开网页读取及子任务编排，见[研究工具说明](RESEARCH-TOOLS.md)。这些能力由宿主执行，不依赖 Go 转发服务端搜索。
+- 默认不启用 Pi 的文件、Shell 或自动发现的扩展工具。`verify-opencode-go.ts` 检查通用工具往返；`verify-research.ts` 单独验证真实搜索、子任务及 Web/Electron 完整链路。
 - 独立真实验证脚本不属于 CI，不应在自动测试中读取个人密钥或发起付费请求。
