@@ -37,6 +37,7 @@ import {
   expandSessionPath,
 } from '../src/sessions/jsonl.ts';
 import { createWorkspace } from '../src/workspaces/storage.ts';
+import { expandPath } from '@threadcove/core/utils';
 
 function makeStoredMessage(id: string, content: string) {
   return { id, type: 'user' as const, content, timestamp: Date.now() };
@@ -238,12 +239,13 @@ describe('R08 session/workspace isolation', () => {
     for (const line of lines) {
       expect(() => JSON.parse(line)).not.toThrow();
     }
-    // The workspace root path never appears in portable form — only the
-    // session directory itself is tokenized (workspaceRootPath is stored
-    // as a ~-prefixed portable path by toPortablePath, so assert on the
-    // raw absolute form instead of the backslash-escaped one).
-    expect(raw).not.toContain(workspaceRoot);
-    expect(raw).toContain('{{SESSION_PATH}}'); // workingDirectory tokenized
+    // Session paths are tokenized. Workspace paths only use ~ when under
+    // the user's home; Linux /tmp and Windows temp overrides may be outside it.
+    // Parse JSON so backslash escaping cannot make this assertion pass by accident.
+    const header = JSON.parse(lines[0]!);
+    expect(header.workingDirectory).toBe('{{SESSION_PATH}}');
+    expect(expandPath(header.workspaceRootPath)).toBe(workspaceRoot);
+    expect(reloaded?.workingDirectory).toBe(getSessionPath(workspaceRoot, s.id));
   });
 
   test('ensureSessionDir creates all standard subdirectories', () => {
