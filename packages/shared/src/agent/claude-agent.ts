@@ -20,7 +20,8 @@ import type {
   SDKPartialAssistantMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentEvent } from '@threadcove/core/types';
+import type { AgentEvent, StoredMessage } from '@threadcove/core/types';
+import { promptWithHistory, restoreTextHistory } from './backend/history.ts';
 import { BaseAgent } from './backend/base-agent.ts';
 import { AbortReason } from './backend/types.ts';
 import type { BackendConfig } from './backend/types.ts';
@@ -38,6 +39,9 @@ export class ClaudeAgent extends BaseAgent {
   private pendingSteerMessage: string | null = null;
   private adapter: ClaudeEventAdapter;
   private destroyed = false;
+  private history: StoredMessage[] = [];
+
+  restoreHistory(messages: StoredMessage[]): void { this.history = restoreTextHistory(messages); }
 
   constructor(config: BackendConfig) {
     super(config, DEFAULT_MODEL);
@@ -58,8 +62,9 @@ export class ClaudeAgent extends BaseAgent {
     this.adapter.startTurn();
 
     const sdkQuery = query({
-      prompt: message,
+      prompt: promptWithHistory(this.history, message),
       options: {
+        env: { ...process.env, ...(this.config.apiKey ? { ANTHROPIC_API_KEY: this.config.apiKey } : {}) },
         abortController: this.abortController,
         cwd: this.workingDirectory,
         model: this._model,
@@ -72,6 +77,8 @@ export class ClaudeAgent extends BaseAgent {
       },
     });
     this.currentQuery = sdkQuery;
+    this.history.push({ id: crypto.randomUUID(), type: 'user', content: message, timestamp: Date.now() });
+    let partial = '';
 
     try {
       for await (const sdkMessage of sdkQuery) {
@@ -85,6 +92,11 @@ export class ClaudeAgent extends BaseAgent {
 
         const events = this.adapter.adapt(sdkMessage);
         for (const event of events) {
+          if (event.type === 'text_delta') partial += event.text;
+          if (event.type === 'text_complete') {
+            this.history.push({ id: crypto.randomUUID(), type: 'assistant', content: event.text, timestamp: Date.now() });
+            partial = '';
+          }
           yield event;
         }
       }
@@ -97,6 +109,8 @@ export class ClaudeAgent extends BaseAgent {
         yield { type: 'error', message: messageText };
       }
     } finally {
+      if (partial) this.history.push({ id: crypto.randomUUID(), type: 'assistant', content: partial, timestamp: Date.now() });
+      this.history = restoreTextHistory(this.history);
       this.currentQuery = null;
       this.abortController = null;
     }
@@ -186,7 +200,6 @@ export class ClaudeAgent extends BaseAgent {
     }
     // The SDK picks up ANTHROPIC_API_KEY from the environment; a configured
     // key is surfaced as injected. Credential values are never logged.
-    process.env['ANTHROPIC_API_KEY'] = apiKey;
     return { authInjected: true };
   }
 

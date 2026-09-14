@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript strict" />
   <img src="https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/Electron-39-47848f?logo=electron&logoColor=white" alt="Electron" />
-  <img src="https://img.shields.io/badge/tests-115%20passing-brightgreen" alt="tests" />
+  <img src="https://img.shields.io/badge/tests-135%20passing-brightgreen" alt="tests" />
 </p>
 
 ---
@@ -77,18 +77,19 @@ UI 调用 api.sendMessage()
 **环境要求**：[Bun](https://bun.sh) ≥ 1.3（Windows/macOS/Linux 均可，本仓库在 win32 上开发）
 
 ```bash
-git clone https://github.com/bfjxke/ThreadCove.git
+git clone https://github.com/Bluuok/ThreadCove.git
 cd ThreadCove
 bun install
 
 # 配置 LLM 密钥（任选其一，写入 .env 或环境变量）
-echo "DEEPSEEK_API_KEY=sk-..." > .env      # DeepSeek（推荐，免费额度友好）
+cp .env.example .env                     # 编辑 .env，填写自己的密钥
 # ANTHROPIC_API_KEY=sk-ant-...             # Claude
 
 # 验证工程链路
 bun run typecheck    # 全仓 strict tsc 零错误
 bun run lint
-bun test             # 115 tests（无密钥时自动跳过 live 测试）
+bun test             # 无密钥时自动跳过 5 个 live 测试
+bun run build        # WebUI 和 Electron 生产构建
 
 # 桌面端
 bun run dev:electron
@@ -98,7 +99,11 @@ bun run server:headless 8787
 bun run dev:webui    # 打开 http://localhost:5173
 ```
 
-**30 秒验证流式对话**（无需 UI）：
+WebUI 启动后，使用 headless 终端输出的带 fragment 引导链接连接；随机 token 只保存在当前浏览器会话。服务默认监听本机，数据位于 `.threadcove-workspace/`。模型可通过 `THREADCOVE_PROVIDER` / `THREADCOVE_MODEL` 配置，任务设置支持持久化模型覆盖。
+
+本次评审整改、兼容边界和验证步骤见 [整改说明](docs/IMPLEMENTATION-REVIEW.md)；OpenDesign 规范与实际前端移植见 [前端设计](docs/FRONTEND-DESIGN.md)。[OpenCode Go 接入说明](docs/OPENCODE-GO.md) 提供本机加密配置与真实 Pi SDK 验证方法。OpenCode Go / DeepSeek V4.1 Flash 已通过真实 SDK、宿主工具往返及 Web/Electron 联调；DeepSeek 直连接口和 Claude API 本次未验证。
+
+**验证流式对话**（需要真实密钥，无需 UI）：
 
 ```bash
 DEEPSEEK_API_KEY=sk-... bun run scripts/smoke-deepseek.ts
@@ -164,7 +169,7 @@ event    { id, type:'event',    channel:'session:event', args:[{ sessionId, even
 - **渲染进程**：preload 只有引导逻辑，无手工 IPC 分发表；`contextIsolation: true`；未分类通道过不了路由穷举测试
 - 细节与已知边界见 **[docs/SECURITY.md](docs/SECURITY.md)**
 
-## 🧪 测试地图（115 tests）
+## 🧪 测试地图
 
 | 套件 | 护住什么 |
 |---|---|
@@ -192,8 +197,8 @@ event    { id, type:'event',    channel:'session:event', args:[{ sessionId, even
 - **不做**：RAG/向量库（主打实时抓取+多源核对）、多 Agent 编排（多任务=多 Session）、Memory/跨任务知识复用、完整 OAuth（凭据手动粘贴，只留 `getToken` 钩子）
 - **MCP 只到统一转换层**：官方 SDK Client + 代理工具组装，不自研 JSON-RPC/握手
 - WebUI 定位是「验证同一套逻辑能否复用」的接续查看面，不是全功能第二产品
-- Pi 后端的子进程协议帧已被 mock 测试全覆盖；`createAgentSession` 的进程内完整接线为后续工作
-- 所有验证均为定性验证（真实 API 冒烟 + 115 项确定性测试），无编造量化指标
+- Pi 后端已接入真实 `createAgentSession`，默认仅允许显式注册的宿主工具；搜索服务和多 Agent 编排仍需另外接线
+- 当前验证：146 项测试通过，5 项 DeepSeek 直连 live 测试跳过；另有真实 OpenCode Go API / Pi SDK / Web / Electron 验收。1M 上下文为模型配置能力，尚未实测满窗口
 
 ## License
 

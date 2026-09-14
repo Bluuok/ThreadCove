@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#233c32">
+  <title>ThreadCove · 个人深度研究工作台</title>
+  <style>
+    :root {
+      --bg: oklch(97.3% 0.012 88); --surface: oklch(99% 0.006 88);
+      --fg: oklch(28% 0.031 166); --muted: oklch(48% 0.020 162);
+      --border: oklch(86% 0.016 90); --accent: oklch(44% 0.065 175);
+      --forest: oklch(28% 0.043 164); --forest-hover: oklch(35% 0.043 164);
+      --on-forest: oklch(96% 0.013 90); --on-forest-muted: oklch(77% 0.024 154);
+      --forest-line: oklch(43% 0.034 164); --forest-selected: oklch(37% 0.042 164);
+      --wash: oklch(93.8% 0.013 88); --teal-wash: oklch(92% 0.027 167);
+      --accent-hover: oklch(36% 0.065 175); --warning: oklch(43% 0.075 55);
+      --danger: oklch(43% 0.12 28); --focus: oklch(47% 0.095 175);
+      --font-display: "Iowan Old Style", "Palatino Linotype", "Noto Serif SC", "Songti SC", "SimSun", serif;
+      --font-body: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --sidebar: 244px; --details: 284px; --radius: 12px;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; width: 100%; height: 100%; }
+    body { background: var(--bg); color: var(--fg); font: 14px/1.6 var(--font-body); }
+    button, input, textarea, select { font: inherit; }
+    button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; color: inherit; }
+    button, a { touch-action: manipulation; }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    a { color: var(--accent); text-underline-offset: 4px; }
+    a:hover { color: var(--accent-hover); }
+    button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex="0"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+    ::selection { background: var(--teal-wash); color: var(--fg); }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3 { text-wrap: balance; }
+    p, li { text-wrap: pretty; overflow-wrap: anywhere; }
+    svg { display: block; width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+    .skip-link { position: fixed; top: 8px; left: 8px; transform: translateY(-160%); padding: 10px 16px; background: var(--surface); z-index: 100; }
+    .skip-link:focus { transform: translateY(0); }
+    .app { display: grid; grid-template-columns: var(--sidebar) minmax(0,1fr); height: 100vh; height: 100dvh; }
+    .sidebar { background: var(--forest); color: var(--on-forest); display: flex; flex-direction: column; min-height: 0; padding: 30px 18px 18px; z-index: 40; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 29px; }
+    .brand svg { width: 29px; height: 33px; stroke-width: 1.3; }
+    .brand-name { font: 25px/1.2 var(--font-display); letter-spacing: -.8px; }
+    .brand-sub { font-size: 10px; letter-spacing: 2.6px; color: var(--on-forest-muted); margin-top: 7px; }
+    .nav-button { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--on-forest); padding: 10px 12px; text-align: left; }
+    .nav-button:hover { background: var(--forest-hover); color: var(--on-forest); }
+    .nav-button.outlined { border-color: var(--forest-line); margin-bottom: 12px; }
+    .shortcut { margin-left: auto; color: var(--on-forest-muted); font: 11px var(--font-mono); }
+    .search-box { display: flex; align-items: center; gap: 9px; padding: 0 11px; border: 1px solid var(--forest-line); border-radius: 7px; margin-bottom: 22px; }
+    .search-box svg { color: var(--on-forest-muted); width: 17px; }
+    .search-box input { width: 100%; min-width: 0; background: transparent; color: var(--on-forest); min-height: 42px; border: 0; outline-offset: 0; }
+    .search-box input::placeholder { color: var(--on-forest-muted); opacity: 1; }
+    .nav-tabs { display: flex; gap: 8px; padding: 0 6px; }
+    .nav-tab { border: 0; border-bottom: 1px solid transparent; background: transparent; color: var(--on-forest-muted); min-height: 44px; padding: 8px 3px; font-size: 12px; }
+    .nav-tab[aria-pressed="true"] { color: var(--on-forest); border-color: var(--on-forest-muted); }
+    .nav-tab:hover { color: var(--on-forest); }
+    .nav-count { font: 10px var(--font-mono); margin-left: 4px; }
+    .task-list { flex: 1; min-height: 0; overflow-y: auto; margin: 16px -6px 14px; padding: 0 6px; scrollbar-width: thin; }
+    .list-caption { color: var(--on-forest-muted); font-size: 10px; letter-spacing: 1.4px; padding: 0 11px 10px; }
+    .task-item { display: block; width: 100%; padding: 12px; background: transparent; border: 1px solid transparent; text-align: left; border-radius: 8px; color: var(--on-forest); margin-bottom: 5px; }
+    .task-item:hover { background: var(--forest-hover); color: var(--on-forest); }
+    .task-item[aria-current="true"] { background: var(--forest-selected); border-color: var(--forest-line); }
+    .task-name { display: block; line-height: 1.6; font-size: 13px; overflow-wrap: anywhere; }
+    .task-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--on-forest-muted); font-size: 10px; margin-top: 7px; }
+    .sidebar-empty { color: var(--on-forest-muted); padding: 16px 10px; font-size: 12px; }
+    .sidebar-bottom { border-top: 1px solid var(--forest-line); padding-top: 13px; }
+    .connection-summary { margin: 12px 12px 0; color: var(--on-forest-muted); font-size: 11px; display: flex; align-items: center; gap: 7px; }
+    .dot { height: 6px; width: 6px; border-radius: 50%; background: currentColor; flex: 0 0 6px; }
+    .sidebar :focus-visible { outline-color: var(--on-forest); }
+    .workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: 72px minmax(0,1fr); }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 0 30px; }
+    .breadcrumb { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 12px; min-width: 0; }
+    .breadcrumb strong { font-weight: 500; color: var(--fg); }
+    .top-actions { display: flex; align-items: center; gap: 14px; }
+    .demo-label { font-size: 10px; letter-spacing: .6px; color: var(--muted); border: 1px solid var(--border); padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
+    .icon-button, .text-button { min-height: 44px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 10px; border-radius: 6px; background: transparent; font-size: 12px; }
+    .icon-button { width: 44px; padding: 10px; flex-shrink: 0; }
+    .icon-button:hover, .text-button:hover { background: var(--wash); border-color: var(--border); color: var(--fg); }
+    .icon-button[aria-expanded="true"] { background: var(--wash); border-color: var(--border); }
+    .research-layout { display: grid; grid-template-columns: minmax(0,1fr) var(--details); min-height: 0; min-width: 0; }
+    .research-layout.details-collapsed { grid-template-columns: minmax(0,1fr); }
+    .research-layout.details-collapsed .details-panel { display: none; }
+    .research-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr) auto; container-type: inline-size; }
+    .task-header { padding: 26px clamp(24px,4.1vw,62px) 22px; border-bottom: 1px solid var(--border); }
+    .task-eyebrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 11px; margin-bottom: 9px; }
+    .eyebrow-label { letter-spacing: 1.7px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; white-space: nowrap; }
+    .status[data-status="running"] { color: var(--accent); }
+    .status[data-status="stopped"], .status[data-status="interrupted"] { color: var(--warning); }
+    .title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    h1 { font-size: clamp(20px,1.8vw,26px); letter-spacing: -.7px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+    .task-description { font-size: 11px; color: var(--muted); margin-top: 6px; }
+    .reading-pane { overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding: 25px clamp(24px,4.1vw,62px) 36px; overscroll-behavior: contain; position: relative; }
+    .question { margin-bottom: 28px; padding: 15px 18px; background: var(--wash); border-radius: 9px; }
+    .question-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; margin-bottom: 7px; }
+    .question p { font-size: 13px; line-height: 1.9; white-space: pre-wrap; }
+    .answer { margin-bottom: 32px; }
+    .answer-byline { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 10px; color: var(--muted); margin-bottom: 17px; }
+    .answer-byline .mini-mark { display: grid; place-items: center; height: 24px; width: 24px; border: 1px solid var(--border); border-radius: 50%; font-family: var(--font-display); font-size: 14px; color: var(--fg); }
+    .answer h2 { font: 600 clamp(23px,2.3vw,32px)/1.55 var(--font-display); letter-spacing: -.5px; margin-bottom: 15px; }
+    .answer .lead { font-size: 14px; line-height: 2; }
+    .answer strong { font-weight: 600; }
+    .insight-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 22px; margin: 25px 0 27px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 21px 0; }
+    .insight-number { font: italic 22px var(--font-display); color: var(--muted); margin-bottom: 8px; }
+    .insight h3 { font-weight: 600; font-size: 13px; margin-bottom: 7px; }
+    .insight p { color: var(--muted); font-size: 12px; line-height: 1.9; }
+    .section-label { display: flex; align-items: baseline; gap: 11px; margin: 24px 0 13px; }
+    .section-label h3 { font-size: 15px; font-weight: 600; }
+    .section-label span { color: var(--muted); font: 10px var(--font-mono); }
+    .findings-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+    .findings-table th { color: var(--muted); font-weight: 400; text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); }
+    .findings-table td { padding: 13px 8px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.9; overflow-wrap: anywhere; }
+    .findings-table th:first-child { width: 22%; padding-left: 0; }
+    .findings-table td:first-child { padding-left: 0; font-weight: 600; }
+    .answer-note { color: var(--muted); font-size: 11px; margin-top: 16px; line-height: 1.8; }
+    .citation { display: inline-flex; justify-content: center; align-items: center; min-width: 44px; min-height: 44px; color: var(--accent); border: 0; border-radius: 5px; background: transparent; font: 11px var(--font-mono); vertical-align: middle; }
+    .citation:hover { color: var(--accent-hover); background: var(--teal-wash); }
+    .answer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 18px; }
+    .answer-actions svg { width: 15px; height: 15px; }
+    .answer-actions .answer-state { margin-left: auto; color: var(--muted); font-size: 10px; }
+    .stream-output { line-height: 2; white-space: pre-wrap; font-size: 14px; min-height: 28px; }
+    .stream-output[data-streaming="true"]::after { content: ""; display: inline-block; width: 5px; height: 15px; margin-left: 4px; background: var(--accent); vertical-align: -2px; animation: cursor 1s steps(1) infinite; }
+    .run-note { padding: 10px 0; font-size: 11px; color: var(--warning); }
+    .composer-dock { padding: 13px clamp(24px,4.1vw,62px) max(13px,env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--border); }
+    .composer-context { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; margin-bottom: 9px; }
+    .composer-context button { min-height: 30px; padding: 2px 8px; }
+    .composer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 4px 14px oklch(28% .031 166 / .035); padding: 11px 12px 9px; }
+    .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--teal-wash); }
+    textarea { resize: none; border: 0; background: transparent; color: var(--fg); width: 100%; min-height: 44px; max-height: 110px; padding: 3px 4px; display: block; line-height: 1.7; }
+    textarea::placeholder { color: var(--muted); opacity: 1; }
+    .composer textarea:focus-visible { outline-offset: 1px; border-radius: 3px; }
+    .composer-bottom { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 4px; }
+    .model-chip { display: flex; gap: 6px; align-items: center; font-size: 11px; min-height: 44px; border: 0; background: transparent; border-radius: 5px; padding: 6px; }
+    .model-chip:hover { background: var(--wash); color: var(--fg); }
+    .model-chip svg { width: 14px; height: 14px; }
+    .primary { min-height: 44px; padding: 9px 16px; border: 1px solid transparent; border-radius: 7px; background: var(--forest); color: var(--on-forest); display: inline-flex; justify-content: center; align-items: center; gap: 8px; font-size: 12px; }
+    .primary:hover { background: oklch(20% .043 164); color: var(--on-forest); }
+    .primary svg { width: 16px; height: 16px; }
+    .primary.stop { background: var(--fg); color: var(--surface); }
+    .primary.stop:hover { background: oklch(20% .031 166); color: var(--surface); }
+    .composer-footnote { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; margin-top: 9px; }
+    .composer-error { color: var(--danger); font-size: 12px; margin: 6px 3px; }
+    .details-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--border); background: var(--surface); z-index: 35; }
+    .details-header { display: flex; justify-content: space-between; align-items: center; padding: 19px 16px 8px 23px; }
+    .details-header h2 { font-size: 13px; font-weight: 600; }
+    .detail-tabs { display: flex; border-bottom: 1px solid var(--border); margin: 0 22px; gap: 20px; }
+    .detail-tab { min-height: 44px; padding: 9px 0; font-size: 11px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; }
+    .detail-tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
+    .detail-tab:hover { color: var(--fg); border-bottom-color: var(--fg); }
+    .details-content { min-height: 0; overflow-y: auto; padding: 23px 22px; scrollbar-width: thin; }
+    .details-caption { font-size: 10px; color: var(--muted); letter-spacing: 1px; margin-bottom: 15px; }
+    .execution-summary { padding-bottom: 23px; }
+    .execution-summary strong { font-size: 15px; font-weight: 500; }
+    .execution-summary p { color: var(--muted); font-size: 11px; margin-top: 7px; line-height: 1.9; }
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li { display: grid; grid-template-columns: 22px minmax(0,1fr); gap: 11px; position: relative; padding-bottom: 27px; }
+    .timeline li:not(:last-child)::after { content: ""; position: absolute; top: 27px; bottom: 6px; left: 10px; width: 1px; background: var(--border); }
+    .step-icon { display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; width: 22px; height: 22px; color: var(--muted); font: 10px var(--font-mono); }
+    .step-icon svg { width: 12px; height: 12px; }
+    .timeline .active .step-icon { color: var(--accent); background: var(--teal-wash); border-color: var(--accent); }
+    .timeline h3 { font-size: 12px; font-weight: 500; }
+    .timeline p { color: var(--muted); font-size: 11px; margin-top: 6px; line-height: 1.8; }
+    .detail-divider { border: 0; border-top: 1px solid var(--border); margin: 0 0 23px; }
+    .scope-row { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; margin-bottom: 12px; }
+    .scope-row span:first-child { color: var(--muted); }
+    .privacy-note { color: var(--muted); font-size: 10px; line-height: 1.9; border-top: 1px solid var(--border); padding-top: 18px; margin-top: 21px; }
+    .source-card { border-bottom: 1px solid var(--border); padding: 0 0 18px; margin-bottom: 19px; }
+    .source-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 8px; }
+    .source-index { font: 11px var(--font-mono); color: var(--muted); }
+    .source-card h3 { font-size: 12px; line-height: 1.8; }
+    .source-card p { color: var(--muted); font-size: 11px; line-height: 1.9; }
+    .source-card .text-button { padding-left: 0; margin-top: 6px; }
+    .source-excerpt { margin-top: 9px; padding: 12px; background: var(--wash); border-radius: 6px; }
+    .empty-state { max-width: 550px; margin: clamp(10px,5vh,62px) auto 0; }
+    .empty-state .empty-mark { width: 46px; height: 46px; margin-bottom: 23px; stroke-width: 1; }
+    .empty-state .overline { letter-spacing: 2px; font-size: 10px; color: var(--muted); margin-bottom: 12px; }
+    .empty-state h2 { font: 600 clamp(26px,3vw,37px)/1.5 var(--font-display); margin-bottom: 16px; }
+    .empty-state p { font-size: 13px; color: var(--muted); line-height: 2; }
+    .prompt-list { margin-top: 27px; border-top: 1px solid var(--border); }
+    .prompt-item { display: flex; justify-content: space-between; align-items: center; gap: 20px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--border); padding: 15px 0; min-height: 54px; color: var(--fg); background: transparent; font-size: 12px; }
+    .prompt-item:hover { background: var(--wash); color: var(--fg); }
+    .prompt-item svg { width: 16px; }
+    .empty-details { color: var(--muted); font-size: 12px; line-height: 2; }
+    .backdrop { position: fixed; inset: 0; background: oklch(18% .02 166 / .35); z-index: 30; }
+    dialog { color: var(--fg); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: min(520px,calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 28px; overflow-y: auto; box-shadow: 0 24px 80px oklch(20% .025 166 / .18); }
+    dialog::backdrop { background: oklch(18% .02 166 / .42); }
+    .dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+    .dialog-header h2 { font: 600 24px/1.4 var(--font-display); }
+    .dialog-description { font-size: 12px; color: var(--muted); line-height: 1.9; margin: 7px 0 24px; }
+    .field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 19px; }
+    .field label, .field-label { font-size: 12px; font-weight: 500; }
+    .field input, .field select { min-height: 46px; width: 100%; padding: 10px 12px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 7px; }
+    .field small { color: var(--muted); font-size: 11px; }
+    .dialog-footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 25px; }
+    .connection-box { border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 12px; }
+    .connection-box p { margin-top: 5px; font-size: 11px; color: var(--muted); line-height: 1.9; }
+    .connection-state { display: flex; align-items: center; gap: 7px; }
+    .setting-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 20px; }
+    .switch-row p { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .switch { min-width: 48px; min-height: 44px; border: 0; background: transparent; padding: 9px 0; }
+    .switch-track { display: flex; width: 44px; height: 24px; border-radius: 15px; background: var(--border); align-items: center; padding: 3px; }
+    .switch-track::after { content: ""; height: 18px; width: 18px; background: var(--surface); border-radius: 50%; box-shadow: 0 1px 3px oklch(20% .025 166 / .2); }
+    .switch[aria-checked="true"] .switch-track { background: var(--accent); justify-content: flex-end; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--surface); padding: 11px 18px; border-radius: 8px; box-shadow: 0 4px 20px oklch(20% .025 166 / .12); max-width: calc(100% - 32px); width: max-content; font-size: 12px; z-index: 100; pointer-events: none; }
+    .mobile-only { display: none; }
+    @container (max-width: 530px) { .insight-grid { gap: 14px; } .insight p { font-size: 11px; } .answer h2 { font-size: 25px; } }
+    @media (min-width: 1600px) { :root { --sidebar: 264px; --details: 310px; } .reading-pane > *, .task-header > *, .composer-dock > * { max-width: 860px; margin-left: auto; margin-right: auto; } }
+    @media (max-width: 1199px) {
+      :root { --sidebar: 222px; } .research-layout { grid-template-columns: minmax(0,1fr); }
+      .details-panel { display: none; } .research-layout.details-open .details-panel { display: flex; position: fixed; right: 0; top: 0; bottom: 0; width: min(360px,calc(100vw - 32px)); z-index: 50; box-shadow: -10px 0 40px oklch(20% .025 166 / .12); }
+      .task-header { padding-left: 32px; padding-right: 32px; } .reading-pane { padding-left: 32px; padding-right: 32px; } .composer-dock { padding-left: 32px; padding-right: 32px; }
+    }
+    @media (max-width: 767px) {
+      .app { grid-template-columns: minmax(0,1fr); } .sidebar { display: none; }
+      .app.nav-open .sidebar { display: flex; position: fixed; top: 0; bottom: 0; left: 0; width: min(300px,calc(100vw - 40px)); z-index: 50; box-shadow: 10px 0 40px oklch(20% .025 166 / .12); }
+      .mobile-only { display: inline-flex; } .brand { padding-bottom: 23px; } .brand .icon-button { margin-left: auto; color: var(--on-forest); } .brand .icon-button:hover { background: var(--forest-hover); }
+      .workspace { grid-template-rows: 60px minmax(0,1fr); } .topbar { padding: 0 12px; gap: 5px; }
+      .breadcrumb { gap: 7px; font-size: 11px; } .breadcrumb .breadcrumb-root, .breadcrumb .slash { display: none; }
+      .top-actions { gap: 4px; } .demo-label { font-size: 9px; } .topbar .icon-button { padding: 11px; }
+      .task-header { padding: 15px 22px 14px; } .task-eyebrow { margin-bottom: 5px; font-size: 10px; }
+      h1 { font-size: 20px; letter-spacing: -.4px; } .task-description { font-size: 10px; } .task-header .icon-button { width: 44px; }
+      .reading-pane { padding: 20px 22px 26px; } .question { padding: 12px 14px; margin-bottom: 23px; } .question p { font-size: 12px; }
+      .answer h2 { font-size: 25px; line-height: 1.65; } .answer .lead { font-size: 13px; }
+      .insight-grid { grid-template-columns: minmax(0,1fr); gap: 18px; padding: 18px 0; margin-top: 20px; }
+      .insight { display: grid; grid-template-columns: 30px minmax(0,1fr); column-gap: 12px; }
+      .insight-number { grid-row: span 2; font-size: 21px; } .insight h3 { margin: 0 0 5px; } .insight p { font-size: 12px; }
+      .composer-dock { padding: 8px 14px max(10px,env(safe-area-inset-bottom)); } .composer-context { margin: 0 4px 6px; }
+      .composer-context button { min-height: 44px; } .composer { padding: 9px; } textarea { font-size: 16px; }
+      .composer-footnote { font-size: 9px; justify-content: center; margin-top: 7px; } .keyboard-hint { display: none; }
+      .composer-bottom { margin-top: 1px; } .empty-state { margin-top: 12px; } .empty-state .empty-mark { margin-bottom: 13px; width: 34px; height: 34px; }
+      .empty-state h2 { font-size: 27px; } .prompt-list { margin-top: 17px; }
+      .findings-table th:nth-child(3), .findings-table td:nth-child(3) { display: none; } .findings-table th:first-child { width: 28%; }
+      .mobile-boundary { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 5px; }
+      dialog { padding: 21px; } .toast { bottom: 14px; } .answer-actions .answer-state { flex-basis: 100%; padding: 4px 10px; }
+    }
+    @media (min-width: 768px) { .mobile-boundary { display: none; } }
+    @media (max-height: 620px) { .task-header { padding-top: 8px; padding-bottom: 8px; } .task-description { display: none; } .composer-context { display: none; } .composer-footnote { margin-top: 4px; } .workspace { grid-template-rows: 54px minmax(0,1fr); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+    @keyframes cursor { 50% { opacity: 0; } }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--forest)"/><circle cx="16" cy="17" r="3" fill="var(--forest)"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><path d="M4 8v12h16V8M9 12h6"/><rect x="3" y="3" width="18" height="5" rx="1"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-thread" viewBox="0 0 32 36"><path d="M7 4v20a8 8 0 0 0 16 0V12a5 5 0 0 0-10 0v15M4 4h13M7 15h16M20 32h8"/></symbol>
+  </defs></svg>
+  <a class="skip-link" href="#prompt" data-od-id="skip-to-composer">跳转到研究输入</a>
+  <div class="app" id="app" data-od-id="research-studio">
+    <aside class="sidebar" id="sidebar" aria-label="研究任务导航" data-od-id="task-sidebar">
+      <div class="brand" data-od-id="threadcove-brand"><svg aria-hidden="true"><use href="#i-thread"/></svg><div><div class="brand-name">ThreadCove</div><div class="brand-sub">个人深度研究工作台</div></div><button class="icon-button mobile-only" id="close-nav" aria-label="关闭任务导航" data-od-id="close-task-navigation"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+      <button class="nav-button outlined" id="new-task" data-od-id="new-research-task"><svg aria-hidden="true"><use href="#i-plus"/></svg>新建研究<span class="shortcut" aria-hidden="true">Alt N</span></button>
+      <label class="search-box" data-od-id="task-search"><svg aria-hidden="true"><use href="#i-search"/></svg><span class="sr-only">搜索任务标题和历史内容</span><input type="search" id="task-search" placeholder="搜索任务与内容" autocomplete="off" aria-controls="task-list"></label>
+      <div class="nav-tabs" role="group" aria-label="任务范围"><button class="nav-tab" id="active-filter" aria-pressed="true" data-od-id="active-task-filter">研究任务 <span class="nav-count" id="active-count">3</span></button><button class="nav-tab" id="archive-filter" aria-pressed="false" data-od-id="archived-task-filter">已归档 <span class="nav-count" id="archive-count">1</span></button></div>
+      <nav class="task-list" id="task-list" aria-label="任务列表" data-od-id="task-list">
+        <div class="list-caption">示例研究</div>
+        <button class="task-item" aria-current="true" data-task-id="seed-knowledge" data-od-id="task-seed-knowledge"><span class="task-name">个人知识管理的下一步</span><span class="task-meta"><span>已完成 · 示例</span><span>已保存</span></span></button>
+        <button class="task-item" data-task-id="seed-local" data-od-id="task-seed-local"><span class="task-name">本地优先的研究工具</span><span class="task-meta"><span>已停止 · 示例</span><span>已保存</span></span></button>
+        <button class="task-item" data-task-id="seed-reading" data-od-id="task-seed-reading"><span class="task-name">长文阅读与笔记流程</span><span class="task-meta"><span>待开始 · 示例</span><span>已保存</span></span></button>
+      </nav>
+      <footer class="sidebar-bottom" data-od-id="workspace-settings"><button class="nav-button" id="settings-button" data-od-id="open-model-settings"><svg aria-hidden="true"><use href="#i-settings"/></svg>模型与连接<span class="shortcut" aria-hidden="true">↗</span></button><div class="connection-summary"><span class="dot"></span><span id="sidebar-connection">本地演示 · 未连接模型</span></div><div class="connection-summary" id="storage-label">任务保存在当前浏览器</div></footer>
+    </aside>
+    <section class="workspace" id="workspace" aria-label="研究工作区" data-od-id="research-workspace">
+      <header class="topbar" data-od-id="workspace-topbar"><div class="breadcrumb"><button class="icon-button mobile-only" id="open-nav" aria-label="打开任务导航" aria-controls="sidebar" aria-expanded="false" data-od-id="open-task-navigation"><svg aria-hidden="true"><use href="#i-menu"/></svg></button><span class="breadcrumb-root">个人工作区</span><span class="slash" aria-hidden="true">/</span><strong>深度研究</strong></div><div class="top-actions"><span class="demo-label">交互原型 · 示例数据</span><button class="icon-button" id="toggle-details" aria-label="收起执行详情" aria-controls="details-panel" aria-expanded="true" title="执行与资料详情" data-od-id="toggle-research-details"><svg aria-hidden="true"><use href="#i-panel"/></svg></button></div></header>
+      <div class="research-layout" id="research-layout">
+        <main class="research-main" id="research-main" data-od-id="research-main">
+          <header class="task-header" data-od-id="current-task-header"><div class="task-eyebrow"><span class="eyebrow-label">研究札记 <span id="task-number">01</span></span><span class="status" id="task-status" data-status="completed"><span class="dot"></span>已完成</span></div><div class="title-row"><h1 id="task-title" data-od-id="current-task-title">个人知识管理的下一步</h1><button class="icon-button" id="archive-task" aria-label="归档当前任务" title="归档当前任务" data-od-id="archive-current-task"><svg aria-hidden="true"><use href="#i-archive"/></svg></button></div><p class="task-description" id="task-description">从一个好问题开始，把线索整理成自己的判断。</p></header>
+          <section class="reading-pane" id="reading-pane" aria-label="研究结果与对话历史" tabindex="0" data-od-id="research-conversation">
+            <div class="question"><div class="question-meta"><span>我的问题</span><span>示例提问</span></div><p>个人知识库如何从「收藏资料」转向「真正使用」？请梳理可落地的工作流，以及需要保留的人为判断。</p></div>
+            <article class="answer" data-od-id="initial-research-answer"><div class="answer-byline"><span class="mini-mark">T</span><span>ThreadCove</span><span>研究结果 · 示例</span></div><h2>从「存得更多」<br>到「用得起来」</h2><p class="lead">知识库的起点，可以从<strong>正在尝试回答的问题</strong>出发。让资料围绕问题聚合，再通过短小、可追溯的判断把它们连接起来，研究才有机会进入下一次行动。</p><div class="insight-grid"><div class="insight"><div class="insight-number">01</div><h3>先有问题，再收集</h3><p>给每条资料一个用途，明确它帮助回答什么。</p></div><div class="insight"><div class="insight-number">02</div><h3>留下自己的判断</h3><p>把原文、推断与尚未确认的内容分开记录。</p></div><div class="insight"><div class="insight-number">03</div><h3>让结论可以重访</h3><p>保留来源与上下文，让下一次研究接着发生。</p></div></div><p class="answer-note">以上为演示文案，用于呈现研究结果的结构；不是实际检索或模型输出。</p></article>
+          </section>
+          <footer class="composer-dock" data-od-id="research-composer-dock"><div class="composer-context"><span id="composer-context">继续追问，让研究再深入一步</span><button class="text-button" id="latest-button" hidden data-od-id="jump-to-latest">查看最新 ↓</button><span id="save-indicator">已保存在此浏览器</span></div><form class="composer" id="composer-form" data-od-id="research-composer"><label class="sr-only" for="prompt">研究问题</label><textarea id="prompt" rows="2" maxlength="4000" placeholder="围绕这个问题，继续追问…" aria-describedby="demo-disclaimer composer-error" data-od-id="research-prompt"></textarea><p id="composer-error" class="composer-error" role="alert" hidden></p><div class="composer-bottom"><button class="model-chip" id="composer-model" type="button" aria-label="打开演示模型设置" data-od-id="composer-model-settings"><span id="model-name">深度研究 · 演示</span><svg aria-hidden="true"><use href="#i-chevron"/></svg></button><button class="primary" id="send-button" type="submit" data-od-id="send-or-stop"><span>发送问题</span><svg aria-hidden="true"><use href="#i-up"/></svg></button></div></form><div class="composer-footnote"><span id="demo-disclaimer">仅演示文本生成，未连接真实模型</span><span class="keyboard-hint">Enter 发送 · Shift Enter 换行</span></div></footer>
+        </main>
+        <aside class="details-panel" id="details-panel" aria-label="执行与资料详情" data-od-id="execution-details-panel"><div class="details-header"><h2 id="details-title" data-od-id="details-heading">研究脉络</h2><button class="icon-button" id="close-details" aria-label="收起执行详情" data-od-id="close-research-details"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="detail-tabs" role="tablist" aria-label="研究详情分类"><button class="detail-tab" role="tab" id="execution-tab" aria-selected="true" aria-controls="execution-pane" data-od-id="execution-tab">执行过程</button><button class="detail-tab" role="tab" id="sources-tab" aria-selected="false" aria-controls="sources-pane" tabindex="-1" data-od-id="sources-tab">引用资料 <span id="source-count">3</span></button></div><div class="details-content"><div id="execution-pane" role="tabpanel" aria-labelledby="execution-tab" tabindex="0" data-od-id="execution-timeline"><div class="execution-summary"><div class="details-caption">本次研究 · 示例</div><strong>问题已整理成研究札记</strong><p>保留过程，方便下一次继续。<br>你可以随时回到任何一条线索。</p></div><ol class="timeline"><li><span class="step-icon">✓</span><div><h3>理解研究问题</h3><p>明确目标、范围与关键概念</p></div></li><li><span class="step-icon">✓</span><div><h3>整理示例资料</h3><p>区分观察、观点与待验证假设</p></div></li><li><span class="step-icon">✓</span><div><h3>组织与综合</h3><p>对照资料，建立可追溯的判断</p></div></li><li><span class="step-icon">✓</span><div><h3>形成研究札记</h3><p>保留边界与后续问题</p></div></li></ol></div><div id="sources-pane" role="tabpanel" aria-labelledby="sources-tab" tabindex="0" data-od-id="research-sources" hidden></div><hr class="detail-divider"><div class="details-caption">研究方式</div><div class="scope-row"><span>模型</span><span id="detail-model">深度研究 · 演示</span></div><div class="scope-row"><span>资料范围</span><span>内置示例</span></div><div class="scope-row"><span>历史保存</span><span id="detail-storage">当前浏览器</span></div><p class="privacy-note">这是可交互原型。示例资料为界面演示文本，未检索互联网，也未向模型发送任何内容。</p></div></aside>
+      </div>
+    </section>
+  </div>
+  <div class="backdrop" id="drawer-backdrop" hidden></div>
+  <dialog id="new-task-dialog" aria-labelledby="new-task-title" data-od-id="create-task-dialog"><form id="new-task-form"><div class="dialog-header"><h2 id="new-task-title" data-od-id="new-task-heading">开启一项新研究</h2><button class="icon-button" type="button" data-close-dialog="new-task-dialog" aria-label="关闭新建研究" data-od-id="close-create-dialog"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><p class="dialog-description">先给问题留一个位置。创建后，可以在研究区输入第一个问题。</p><div class="field"><label for="new-title">研究名称</label><input id="new-title" required maxlength="64" placeholder="例如：建立适合自己的阅读工作流" autocomplete="off" data-od-id="new-task-name"><small>最多 64 个字符，可使用中文。</small></div><div class="dialog-footer"><button class="text-button" type="button" data-close-dialog="new-task-dialog" data-od-id="cancel-create-task">取消</button><button class="primary" type="submit" data-od-id="confirm-create-task">创建研究<svg aria-hidden="true"><use href="#i-arrow"/></svg></button></div></form></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title" data-od-id="model-settings-dialog"><form id="settings-form"><div class="dialog-header"><h2 id="settings-title" data-od-id="model-settings-heading">模型与连接</h2><button class="icon-button" type="button" data-close-dialog="settings-dialog" aria-label="关闭模型设置" data-od-id="close-settings-dialog"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div><p class="dialog-description">调整此原型的演示方式。这里不会请求真实模型服务，也不需要填写密钥。</p><div class="field"><label for="model-select">研究模式</label><select id="model-select" data-od-id="research-mode-select"><option value="deep">深度研究 · 演示</option><option value="brief">简洁回答 · 演示</option></select><small>影响后续回答的组织结构与长度。</small></div><div class="field"><label for="speed-select">演示文本速度</label><select id="speed-select" data-od-id="stream-speed-select"><option value="steady">从容阅读</option><option value="fast">快速呈现</option></select></div><div class="connection-box" data-od-id="connection-status"><div class="connection-state"><span class="dot"></span><strong id="connection-title">本地演示可用</strong></div><p id="connection-description">未配置真实模型连接。发送后将逐段呈现内置示例文本。</p><div class="setting-actions"><button class="text-button" type="button" id="check-connection" data-od-id="check-demo-connection">检查演示状态</button><button class="text-button" type="button" id="disconnect-demo" data-od-id="toggle-demo-connection">断开演示连接</button></div></div><div class="switch-row"><div><div class="field-label" id="follow-label">跟随最新结果</div><p>向上阅读时自动暂停跟随。</p></div><button class="switch" id="autofollow-switch" type="button" role="switch" aria-checked="true" aria-labelledby="follow-label" data-od-id="auto-follow-setting"><span class="switch-track" aria-hidden="true"></span></button></div><div class="dialog-footer"><button class="text-button" type="button" data-close-dialog="settings-dialog" data-od-id="cancel-settings">取消</button><button class="primary" type="submit" data-od-id="save-settings">保存设置</button></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="sr-only" id="announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript><p style="position:fixed;bottom:0;background:var(--surface);padding:12px;z-index:99">启用 JavaScript 后可体验创建、文本生成与历史保存。当前展示静态示例。</p></noscript>
+  <script>
+    'use strict';
+    const STORE_KEY = 'threadcove.studio.v1';
+    const $ = id => document.getElementById(id);
+    const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const icon = name => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
+    const uid = () => 't-' + (globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const modeLabel = mode => mode === 'brief' ? '简洁回答 · 演示' : '深度研究 · 演示';
+    const statusLabel = status => ({completed:'已完成',running:'正在生成',stopped:'已停止',interrupted:'已中断',draft:'待开始',archived:'已归档'}[status] || '待开始');
+    const seedSources = [
+      {id:'01',title:'资料收集与使用 · 示例提纲',type:'内置演示文本',summary:'用于展示从收集目的到实际使用的整理结构。',excerpt:'示例摘录：保存资料前，先写下它服务的研究问题；整理时记录支持的观点、可能的反例与下一步行动。此内容不是访谈记录或外部文献。'},
+      {id:'02',title:'研究札记 · 示例结构',type:'内置演示文本',summary:'问题、线索、判断与待验证事项的组织方式。',excerpt:'示例摘录：每条判断可对应一段原始材料，并说明推断过程。没有充分依据时，保留为待验证假设。此内容仅为原型撰写。'},
+      {id:'03',title:'重访与复盘 · 示例清单',type:'内置演示文本',summary:'展示如何保留上下文并发起后续研究。',excerpt:'示例摘录：重访研究时，先检查问题是否改变、资料是否仍适用，再决定补充证据或修订结论。此清单未经过效果验证。'}
+    ];
+    function seedState() {
+      return {version:1,activeId:'seed-knowledge',filter:'active',detailsOpen:true,settings:{mode:'deep',speed:'steady',follow:true,connected:true},tasks:[
+        {id:'seed-knowledge',title:'个人知识管理的下一步',archived:false,draft:'',example:true,updatedAt:0,messages:[
+          {id:'q-knowledge',role:'user',example:true,text:'个人知识库如何从「收藏资料」转向「真正使用」？请梳理可落地的工作流，以及需要保留的人为判断。'},
+          {id:'a-knowledge',role:'assistant',kind:'knowledge',status:'completed',mode:'deep',text:'从「存得更多」到「用得起来」\n知识库可以从正在尝试回答的问题出发。先有问题，再收集；留下自己的判断；让结论可以重访。以上为演示文案，不是实际研究结论。'}]},
+        {id:'seed-local',title:'本地优先的研究工具',archived:false,draft:'',example:true,updatedAt:0,messages:[
+          {id:'q-local',role:'user',example:true,text:'设计个人研究工具时，哪些内容适合留在本地，哪些能力需要在线服务？'},
+          {id:'a-local',role:'assistant',kind:'stream',status:'stopped',mode:'deep',text:'这是一段已停止的示例回答，展示中途保留的历史。\n\n可以先按数据归属拆分需求：任务标题、个人草稿与阅读位置可以作为本地状态；检索和模型推理需要由实际产品确认服务边界。\n\n接下来，仍需明确同步冲突、导出与恢复的设计。这里尚未形成完整判断。',note:'演示已停止，已生成的文字保留在历史中。'}]},
+        {id:'seed-reading',title:'长文阅读与笔记流程',archived:false,draft:'如何把长文阅读中的零散摘录，整理成可以继续追问的笔记？',example:true,updatedAt:0,messages:[]},
+        {id:'seed-archive',title:'阅读清单的整理方法',archived:true,draft:'',example:true,updatedAt:0,messages:[{id:'q-archive',role:'user',example:true,text:'如何为自己的阅读清单建立整理原则？'},{id:'a-archive',role:'assistant',kind:'stream',status:'completed',mode:'brief',text:'示例回答：先写明本次阅读想解决的问题，再把清单区分为当前相关、以后重访与暂不处理。\n\n整理标准应由实际需要决定。这段内容仅用于演示归档后仍可查看历史。'}]}
+      ]};
+    }
+    let storageAvailable = true, storageWarned = false, recoveryNotice = '', recoveredRuns = false;
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORE_KEY); if (!raw) return seedState();
+        const saved = JSON.parse(raw);
+        if (saved.version !== 1 || !Array.isArray(saved.tasks) || !saved.tasks.length || saved.tasks.length > 500 || new Set(saved.tasks.map(t => t.id)).size !== saved.tasks.length) throw Error('Invalid state');
+        for (const task of saved.tasks) {
+          if (!/^[a-zA-Z0-9-]+$/.test(task.id) || typeof task.title !== 'string' || !task.title.trim() || task.title.length > 64 || !Array.isArray(task.messages)) throw Error('Invalid task');
+          task.draft = typeof task.draft === 'string' ? task.draft.slice(0,4000) : ''; task.archived = !!task.archived;
+          if (new Set(task.messages.map(m => m.id)).size !== task.messages.length) throw Error('Duplicate message');
+          for (const msg of task.messages) {
+            if (!/^[a-zA-Z0-9-]+$/.test(msg.id) || !['user','assistant'].includes(msg.role) || typeof msg.text !== 'string' || msg.text.length > 100000) throw Error('Invalid message');
+            if (msg.role === 'assistant' && !['running','completed','stopped','interrupted'].includes(msg.status)) throw Error('Invalid status');
+            if (msg.status === 'running') { msg.status = 'interrupted'; msg.note = '上次演示因页面关闭或刷新中断，已保留文字。可以继续追问。'; recoveredRuns = true; }
+          }
+        }
+        const options = saved.settings || {};
+        saved.settings = {mode:options.mode === 'brief' ? 'brief' : 'deep',speed:options.speed === 'fast' ? 'fast' : 'steady',follow:options.follow !== false,connected:options.connected !== false};
+        saved.activeId = saved.tasks.some(t => t.id === saved.activeId) ? saved.activeId : saved.tasks[0].id;
+        saved.detailsOpen = saved.detailsOpen !== false; saved.filter = saved.filter === 'archived' ? 'archived' : 'active';
+        return saved;
+      } catch (error) {
+        if (error instanceof SyntaxError || error.message.startsWith('Invalid') || error.message.startsWith('Duplicate')) recoveryNotice = '原有本地数据无法解析，已载入示例。原始数据仍保留，当前会话不会覆盖它。';
+        else recoveryNotice = '浏览器未允许本地保存；本次内容仅保留在当前页面。';
+        storageAvailable = false; return seedState();
+      }
+    }
+    let state = loadState(), runs = new Map(), filterQuery = '', activeDetailTab = 'execution', drawer = null, drawerReturn = null, settingsDraft = null, followLatest = true;
+    let toastTimer, draftTimer, lastSave = 0;
+    const desktopMedia = matchMedia('(min-width: 1200px)'), mobileMedia = matchMedia('(max-width: 767px)'), reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const currentTask = () => state.tasks.find(task => task.id === state.activeId);
+    const lastAnswer = task => [...task.messages].reverse().find(msg => msg.role === 'assistant');
+    const taskStatus = task => task.archived ? 'archived' : (lastAnswer(task)?.status || 'draft');
+    function notify(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; },4200); }
+    function announce(message) { $('announcer').textContent = message; }
+    function save() {
+      if (storageAvailable) {
+        try { localStorage.setItem(STORE_KEY,JSON.stringify(state)); }
+        catch { storageAvailable = false; if (!storageWarned) { notify('本地保存不可用，本次内容仅保留在当前页面。'); storageWarned = true; } }
+      }
+      $('save-indicator').textContent = storageAvailable ? '已保存在此浏览器' : '未持久保存';
+      $('storage-label').textContent = storageAvailable ? '任务保存在当前浏览器' : '仅当前页面 · 关闭后可能丢失';
+      $('detail-storage').textContent = storageAvailable ? '当前浏览器' : '仅当前页面';
+      lastSave = Date.now();
+    }
+    function renderTasks() {
+      $('active-count').textContent = state.tasks.filter(t => !t.archived).length;
+      $('archive-count').textContent = state.tasks.filter(t => t.archived).length;
+      $('active-filter').setAttribute('aria-pressed',String(state.filter === 'active')); $('archive-filter').setAttribute('aria-pressed',String(state.filter === 'archived'));
+      const query = filterQuery.trim().toLocaleLowerCase();
+      const matches = state.tasks.filter(t => t.archived === (state.filter === 'archived') && (!query || `${t.title}\n${t.draft}\n${t.messages.map(m => m.text).join('\n')}`.toLocaleLowerCase().includes(query)));
+      $('task-list').innerHTML = `<div class="list-caption">${query ? `找到 ${matches.length} 项研究` : state.filter === 'archived' ? '留存的研究' : '我的研究'}</div>` + (matches.length ? matches.map(t => `<button class="task-item" data-task-id="${t.id}" data-od-id="task-${t.id}" ${t.id === state.activeId ? 'aria-current="true"' : ''}><span class="task-name">${escapeHTML(t.title)}</span><span class="task-meta"><span>${statusLabel(taskStatus(t))}${t.example ? ' · 示例' : ''}</span><span>${t.updatedAt ? '本地' : '已保存'}</span></span></button>`).join('') : `<p class="sidebar-empty">${query ? '没有匹配的任务。试试其他关键词，或切换任务范围。' : '这里还没有任务。归档后的研究会保留完整历史。'}</p>`);
+    }
+    function knowledgeContent() {
+      return `<h2>从「存得更多」<br>到「用得起来」</h2><p class="lead">知识库的起点，可以从<strong>正在尝试回答的问题</strong>出发。让资料围绕问题聚合，再通过短小、可追溯的判断把它们连接起来，研究才有机会进入下一次行动。<button class="citation" data-source="01" aria-label="查看示例资料 01" data-od-id="citation-01">[01]</button></p><div class="insight-grid" data-od-id="research-key-insights"><div class="insight" data-od-id="insight-question"><div class="insight-number">01</div><h3>先有问题，再收集</h3><p>给每条资料一个用途，明确它帮助回答什么。</p></div><div class="insight" data-od-id="insight-judgment"><div class="insight-number">02</div><h3>留下自己的判断</h3><p>把原文、推断与尚未确认的内容分开记录。</p></div><div class="insight" data-od-id="insight-revisit"><div class="insight-number">03</div><h3>让结论可以重访</h3><p>保留来源与上下文，让下一次研究接着发生。</p></div></div><div class="section-label"><span>01 /</span><h3 data-od-id="workflow-heading">一个可以开始的工作流</h3></div><table class="findings-table" data-od-id="research-workflow-table"><caption class="sr-only">示例工作流与需要保留的人为判断</caption><thead><tr><th scope="col">环节</th><th scope="col">可行做法</th><th scope="col">需要保留的判断</th></tr></thead><tbody><tr><td>收集</td><td>围绕当前问题收录资料，记下来源与阅读目的。<span class="mobile-boundary">判断：它是否与问题相关？</span></td><td>它是否与问题相关？</td></tr><tr><td>综合</td><td>把材料整理为论点，标出支持、反例与未知。<span class="mobile-boundary">判断：证据是否足够？</span></td><td>证据是否足够？</td></tr><tr><td>重访</td><td>将结论用于实际任务，再回看哪些假设需要修订。<span class="mobile-boundary">判断：问题是否已经改变？</span></td><td>问题是否已经改变？</td></tr></tbody></table><div class="section-label"><span>02 /</span><h3 data-od-id="research-boundary-heading">工具之外，仍需自己决定</h3></div><p class="lead">整理结构可以交给工具辅助；什么值得研究、证据是否可信，以及何时采取行动，仍需要保留自己的判断。<button class="citation" data-source="02" aria-label="查看示例资料 02" data-od-id="citation-02">[02]</button>重访时，也应检查这些结论是否仍然适用。<button class="citation" data-source="03" aria-label="查看示例资料 03" data-od-id="citation-03">[03]</button></p><p class="answer-note">示例说明：以上内容用于演示研究结果的组织方式，未进行真实检索或效果验证；引用编号仅对应内置演示资料。</p>`;
+    }
+    function emptyContent(task) {
+      return `<div class="empty-state" data-od-id="new-research-empty-state"><svg class="empty-mark" aria-hidden="true"><use href="#i-thread"/></svg><div class="overline">留一个位置，给好问题</div><h2 data-od-id="empty-state-heading">从好奇开始，<br>让思考慢慢成形。</h2><p>把想弄清楚的事写下来。你可以补充背景、限定范围，或在过程中随时停下。所有回答均为演示文本。</p><div class="prompt-list" data-od-id="suggested-prompts"><button class="prompt-item" type="button" data-prompt="如何把零散的资料整理成一份可追溯的研究札记？" data-od-id="prompt-research-notes">把零散资料整理成研究札记${icon('arrow')}</button><button class="prompt-item" type="button" data-prompt="请帮我拆解这个研究主题的关键问题、证据要求和待验证假设。" data-od-id="prompt-key-questions">先拆解问题，再决定研究范围${icon('arrow')}</button></div></div>`;
+    }
+    function messageHTML(msg) {
+      if (msg.role === 'user') return `<div class="question" data-od-id="question-${msg.id}"><div class="question-meta"><span>我的问题</span><span>${msg.example ? '示例提问' : '本地记录'}</span></div><p>${escapeHTML(msg.text)}</p></div>`;
+      const running = msg.status === 'running';
+      return `<article class="answer" id="message-${msg.id}" aria-busy="${running}" data-od-id="answer-${msg.id}"><div class="answer-byline"><span class="mini-mark">T</span><span>ThreadCove</span><span>${modeLabel(msg.mode)}</span></div>${msg.kind === 'knowledge' ? knowledgeContent() : `<div class="stream-output" id="output-${msg.id}" data-streaming="${running}">${escapeHTML(msg.text)}</div>`}<p class="run-note" id="note-${msg.id}" ${msg.note ? '' : 'hidden'}>${escapeHTML(msg.note)}</p><div class="answer-actions"><button class="text-button" data-copy="${msg.id}" data-od-id="copy-${msg.id}" ${!msg.text ? 'disabled' : ''}>${icon('copy')}复制结果</button>${!running ? `<button class="text-button" data-followup="${msg.id}" data-od-id="followup-${msg.id}">继续追问${icon('arrow')}</button>` : ''}<span class="answer-state">${statusLabel(msg.status)} · ${msg.kind === 'knowledge' ? '含 3 份示例资料' : '未检索外部资料'}</span></div></article>`;
+    }
+    function renderConversation() {
+      const task = currentTask(); $('reading-pane').innerHTML = task.messages.length ? task.messages.map(messageHTML).join('') : emptyContent(task);
+    }
+    function renderHeader() {
+      const task = currentTask(), status = taskStatus(task);
+      $('task-title').textContent = task.title; $('task-number').textContent = String(state.tasks.indexOf(task) + 1).padStart(2,'0');
+      $('task-status').dataset.status = status; $('task-status').innerHTML = `<span class="dot"></span>${statusLabel(status)}`;
+      $('task-description').textContent = task.archived ? '研究已归档，历史仍可阅读；恢复后可继续追问。' : '从一个好问题开始，把线索整理成自己的判断。';
+      $('archive-task').setAttribute('aria-label',task.archived ? '恢复当前任务' : '归档当前任务'); $('archive-task').title = task.archived ? '恢复当前任务' : '归档当前任务';
+    }
+    function renderComposer(loadDraft = false) {
+      const task = currentTask(), running = runs.has(task.id);
+      if (loadDraft) $('prompt').value = task.draft;
+      $('prompt').disabled = task.archived; $('prompt').readOnly = running;
+      $('prompt').placeholder = task.archived ? '恢复归档任务后，可以继续研究' : running ? '示例文本生成中；可随时停止并保留结果' : task.messages.length ? '围绕这个问题，继续追问…' : '写下第一个研究问题…';
+      $('send-button').classList.toggle('stop',running); $('send-button').disabled = task.archived || (!running && !$('prompt').value.trim());
+      $('send-button').innerHTML = running ? '<span aria-hidden="true">■</span><span>停止生成</span>' : `<span>发送问题</span>${icon('up')}`;
+      $('send-button').setAttribute('aria-label',running ? '停止当前任务生成，保留已生成的文字' : '发送研究问题');
+      $('composer-context').textContent = task.archived ? '归档历史 · 只读' : running ? '正在逐段呈现示例文本' : task.messages.length ? '继续追问，让研究再深入一步' : '一个具体的问题，是研究的起点';
+      $('model-name').textContent = modeLabel(state.settings.mode); $('detail-model').textContent = modeLabel(lastAnswer(task)?.mode || state.settings.mode);
+      $('sidebar-connection').textContent = state.settings.connected ? '本地演示 · 未连接模型' : '演示已断开 · 未连接模型';
+    }
+    function renderDetails() {
+      const task = currentTask(), answer = lastAnswer(task), status = answer?.status || 'draft', run = runs.get(task.id);
+      const sources = answer?.kind === 'knowledge' ? seedSources : [];
+      $('source-count').textContent = sources.length;
+      const steps = [{title:'理解研究问题',description:'明确目标、范围与关键概念'},{title:'整理示例资料',description:answer?.kind === 'knowledge' ? '读取 3 份内置演示资料' : '仅使用内置示例，无外部检索'},{title:'组织与综合',description:'展示问题、线索与判断的结构'},{title:'形成研究札记',description:'保留边界与后续问题'}];
+      const currentStep = run ? Math.min(3,Math.floor(run.offset / run.fullText.length * 4)) : status === 'completed' ? 4 : answer ? 2 : 0;
+      const summary = {completed:'问题已整理成研究札记',running:'正在生成示例研究文本',stopped:'已停止，文字已保留',interrupted:'上次演示已中断',draft:'等待第一个研究问题'}[status];
+      $('execution-pane').innerHTML = `<div class="execution-summary"><div class="details-caption">本次研究 · 示例</div><strong>${summary}</strong><p>${status === 'draft' ? '发送问题后，在这里查看演示步骤。' : status === 'running' ? '进度表示本地文本呈现阶段，不是真实模型执行记录。' : '保留过程，方便下一次继续。所有步骤均为界面演示。'}</p></div><ol class="timeline">${steps.map((step,index) => `<li class="${index === currentStep && status === 'running' ? 'active' : ''}" data-od-id="execution-step-${index+1}"><span class="step-icon">${index < currentStep ? icon('check') : String(index+1).padStart(2,'0')}</span><div><h3>${step.title}</h3><p>${step.description}${index === currentStep && status === 'running' ? ' · 正在演示' : index >= currentStep && status !== 'completed' ? ' · 尚未完成' : ''}</p></div></li>`).join('')}</ol>`;
+      $('sources-pane').innerHTML = sources.length ? `<div class="details-caption">${sources.length} 份内置示例 · 非外部文献</div>` + sources.map(source => `<article class="source-card" data-od-id="source-${source.id}"><div class="source-head"><span class="source-index">${source.id}</span><h3>${source.title}</h3></div><p>${source.type} · ${source.summary}</p><button class="text-button" id="source-toggle-${source.id}" data-excerpt="${source.id}" aria-expanded="false" aria-controls="excerpt-${source.id}" data-od-id="expand-source-${source.id}">展开示例摘录${icon('chevron')}</button><div class="source-excerpt" id="excerpt-${source.id}" hidden><p>${source.excerpt}</p></div></article>`).join('') : `<p class="empty-details">${status === 'draft' ? '尚未关联资料。' : '本次回答没有引用外部资料。'}<br>此原型仅演示文本输出，不会执行网络检索。</p>`;
+      setDetailTab(activeDetailTab,false);
+    }
+    function renderAll() { renderTasks(); renderHeader(); renderConversation(); renderComposer(true); renderDetails(); applyShell(); }
+    function setDetailTab(tab, focus = false) {
+      activeDetailTab = tab;
+      for (const name of ['execution','sources']) { const selected = name === tab; $(name+'-tab').setAttribute('aria-selected',String(selected)); $(name+'-tab').tabIndex = selected ? 0 : -1; $(name+'-pane').hidden = !selected; }
+      if (focus) $(tab+'-tab').focus();
+    }
+    function applyShell() {
+      if (drawer === 'nav' && !mobileMedia.matches || drawer === 'details' && desktopMedia.matches) drawer = null;
+      const detailsVisible = desktopMedia.matches ? state.detailsOpen : drawer === 'details';
+      $('app').classList.toggle('nav-open',drawer === 'nav'); $('research-layout').classList.toggle('details-open',drawer === 'details');
+      $('research-layout').classList.toggle('details-collapsed',desktopMedia.matches && !state.detailsOpen);
+      $('toggle-details').setAttribute('aria-expanded',String(detailsVisible)); $('toggle-details').setAttribute('aria-label',detailsVisible ? '收起执行详情' : '展开执行与资料详情');
+      $('open-nav').setAttribute('aria-expanded',String(drawer === 'nav')); $('drawer-backdrop').hidden = !drawer;
+      $('workspace').inert = drawer === 'nav'; $('sidebar').inert = drawer === 'details'; $('research-main').inert = drawer === 'details'; document.querySelector('.topbar').inert = drawer === 'details';
+      for (const [id,active] of [['sidebar',drawer === 'nav'],['details-panel',drawer === 'details']]) { const panel = $(id); if (active) { panel.setAttribute('role','dialog'); panel.setAttribute('aria-modal','true'); } else { panel.removeAttribute('role'); panel.removeAttribute('aria-modal'); } }
+    }
+    function closeDrawers(restore = true) { const previous = drawerReturn; drawer = null; applyShell(); if (restore && previous?.isConnected && previous.getClientRects().length) previous.focus(); }
+    function openDrawer(name) { drawerReturn = document.activeElement; drawer = name; applyShell(); $(name === 'nav' ? 'close-nav' : 'close-details').focus(); }
+    function toggleDetails(force) {
+      if (desktopMedia.matches) { state.detailsOpen = typeof force === 'boolean' ? force : !state.detailsOpen; applyShell(); save(); if (!state.detailsOpen) $('toggle-details').focus(); }
+      else if (force === false || drawer === 'details' && force !== true) closeDrawers(); else openDrawer('details');
+    }
+    function clearError() { $('composer-error').hidden = true; $('composer-error').textContent = ''; }
+    function switchTask(id) {
+      if (!state.tasks.some(t => t.id === id)) return;
+      clearTimeout(draftTimer); state.activeId = id; followLatest = true; clearError(); closeDrawers(false); renderAll(); $('reading-pane').scrollTop = 0; updateLatest(); save();
+      if (mobileMedia.matches) $('open-nav').focus(); announce('已打开研究：'+currentTask().title);
+    }
+    function scrollLatest() { const pane = $('reading-pane'); pane.scrollTop = pane.scrollHeight; followLatest = true; updateLatest(); }
+    function updateLatest() { const pane = $('reading-pane'); $('latest-button').hidden = pane.scrollHeight - pane.clientHeight - pane.scrollTop < 90; }
+    function streamText(question,mode) {
+      const subject = question.length > 160 ? question.slice(0,160)+'…' : question;
+      const opening = `以下为内置示例回答，用于演示文本逐段呈现；没有调用模型或检索资料。\n\n你的问题\n${subject}\n\n`;
+      if (mode === 'brief') return opening + '可以先从这里开始\n把这个问题拆成目标、已知信息和仍需确认的假设。先定义一个足够具体、能够判断是否完成的小目标，再寻找支持和反对它的材料。\n\n下一步\n补充你希望解决的具体场景，以及最终希望得到的产出。当前没有真实证据，不据此下确定结论。\n\n示例结束。你可以继续追问，或者保留这份记录以后重访。';
+      return opening + '01 / 明确问题边界\n先写下这次研究最终要帮助你做什么决定。区分需要解释的现象、可以比较的方案，以及暂时不能验证的假设。范围越明确，后续材料越容易判断是否相关。\n\n02 / 建立资料与判断的联系\n实际研究时，可逐条记录资料来源、发布时间与适用背景。将原文观察和个人推断分开，并主动寻找反例。本原型没有读取这些资料，因此不提供已验证的论据或引用。\n\n03 / 组织可追溯的结论\n每条结论都应回答：它基于哪些证据？还有哪些限制？下一步需要验证什么？暂时缺乏依据的部分，可以保留为开放问题，而不是用完整的措辞掩盖不确定性。\n\n04 / 给下一次研究留一个入口\n建议选取一个最小的实际场景进行观察，再带着新材料重访当前任务。保留原来的问题和中途修订，有助于理解判断是如何变化的。\n\n待你补充\n使用场景、预期产出，以及需要排除的范围。\n\n示例结束。这份文本仅展示研究工作流与界面状态，不构成对提问主题的实际研究结论。';
+    }
+    function submitQuestion(event) {
+      event?.preventDefault(); const task = currentTask();
+      if (runs.has(task.id)) { stopRun(task.id); return; }
+      if (task.archived) { notify('恢复归档任务后即可继续研究。'); return; }
+      const question = $('prompt').value.trim(); if (!question) { $('prompt').focus(); return; }
+      if (!state.settings.connected) { $('composer-error').textContent = '演示连接已断开。打开“模型与连接”，恢复演示连接并保存后重试。'; $('composer-error').hidden = false; return; }
+      clearError(); clearTimeout(draftTimer); task.messages.push({id:uid(),role:'user',text:question});
+      const msg = {id:uid(),role:'assistant',kind:'stream',status:'running',mode:state.settings.mode,text:''}; task.messages.push(msg); task.draft = ''; task.updatedAt = Date.now();
+      const run = {messageId:msg.id,fullText:streamText(question,state.settings.mode),offset:0,timer:null,lastStep:-1,speed:state.settings.speed}; runs.set(task.id,run);
+      renderTasks(); renderHeader(); renderConversation(); renderComposer(true); renderDetails(); scrollLatest(); save(); announce('已开始生成示例文本，可随时停止。');
+      const interval = run.speed === 'fast' ? 40 : reducedMotion.matches ? 320 : 48;
+      run.timer = setInterval(() => tickRun(task.id),interval);
+    }
+    function tickRun(taskId) {
+      const run = runs.get(taskId), task = state.tasks.find(t => t.id === taskId); if (!run || !task) return;
+      const msg = task.messages.find(m => m.id === run.messageId); if (!msg || msg.status !== 'running') return;
+      run.offset = Math.min(run.fullText.length,run.offset + (run.speed === 'fast' ? 14 : reducedMotion.matches ? 14 : 2)); msg.text = run.fullText.slice(0,run.offset);
+      if (state.activeId === taskId) {
+        const output = $('output-'+msg.id); if (output) output.textContent = msg.text;
+        const copyButton = document.querySelector(`[data-copy="${msg.id}"]`); if (copyButton) copyButton.disabled = !msg.text;
+        const step = Math.min(3,Math.floor(run.offset/run.fullText.length*4));
+        if (step !== run.lastStep) { renderDetails(); run.lastStep = step; }
+        if (followLatest && state.settings.follow) scrollLatest(); else updateLatest();
+      }
+      if (Date.now() - lastSave > 700) save();
+      if (run.offset >= run.fullText.length) finishRun(taskId,'completed');
+    }
+    function finishRun(taskId,status,note = '') {
+      const run = runs.get(taskId), task = state.tasks.find(t => t.id === taskId); if (!run || !task) return;
+      clearInterval(run.timer); runs.delete(taskId); const msg = task.messages.find(m => m.id === run.messageId); msg.status = status; msg.note = note; task.updatedAt = Date.now();
+      renderTasks();
+      if (state.activeId === taskId) { const oldScroll = $('reading-pane').scrollTop; renderHeader(); renderConversation(); renderComposer(); renderDetails(); $('reading-pane').scrollTop = oldScroll; if (followLatest && state.settings.follow) scrollLatest(); }
+      save(); announce(`${task.title}：${statusLabel(status)}，文字已保留。`);
+    }
+    function stopRun(taskId,reason = '演示已停止，已生成的文字保留在历史中。') { finishRun(taskId,'stopped',reason); }
+    function archiveCurrent() {
+      const task = currentTask(); if (runs.has(task.id)) { notify('请先停止当前生成，再归档这项研究。'); return; }
+      task.archived = !task.archived; state.filter = task.archived ? 'archived' : 'active'; filterQuery = ''; $('task-search').value = ''; task.updatedAt = Date.now(); renderAll(); save(); notify(task.archived ? '研究已归档，仍可搜索和查看历史。' : '研究已恢复，可以继续追问。');
+    }
+    function openDialog(id) {
+      closeDrawers(false);
+      if (id === 'new-task-dialog') { $('new-task-form').reset(); $('new-title').setCustomValidity(''); }
+      if (id === 'settings-dialog') { settingsDraft = {...state.settings}; $('model-select').value = settingsDraft.mode; $('speed-select').value = settingsDraft.speed; $('autofollow-switch').setAttribute('aria-checked',String(settingsDraft.follow)); renderConnection(); }
+      $(id).showModal(); if (id === 'new-task-dialog') $('new-title').focus();
+    }
+    function renderConnection(checked = false) {
+      $('connection-title').textContent = settingsDraft.connected ? '本地演示可用' : '演示连接已断开';
+      $('connection-description').textContent = checked ? settingsDraft.connected ? '检查完成：本地示例可用。真实模型未配置，也未进行网络请求。' : '检查完成：演示已暂停。恢复演示连接并保存后可发送问题。' : '未配置真实模型连接。连接操作与其他设置一起保存后生效。';
+      $('disconnect-demo').textContent = settingsDraft.connected ? '断开演示连接' : '恢复演示连接';
+    }
+    $('new-task').addEventListener('click',() => openDialog('new-task-dialog'));
+    $('new-title').addEventListener('input',() => $('new-title').setCustomValidity(''));
+    $('new-task-form').addEventListener('submit',event => { event.preventDefault(); const title = $('new-title').value.trim(); if (!title) { $('new-title').setCustomValidity('请输入研究名称，不能仅包含空格。'); $('new-title').reportValidity(); return; } const task = {id:uid(),title:title.slice(0,64),archived:false,draft:'',example:false,updatedAt:Date.now(),messages:[]}; state.tasks.unshift(task); state.filter = 'active'; filterQuery = ''; $('task-search').value = ''; $('new-task-dialog').close(); switchTask(task.id); $('prompt').focus(); notify('研究已创建，写下第一个问题吧。'); });
+    $('task-list').addEventListener('click',event => { const button = event.target.closest('[data-task-id]'); if (button) switchTask(button.dataset.taskId); });
+    $('task-search').addEventListener('input',event => { filterQuery = event.target.value; renderTasks(); });
+    for (const [id,filter] of [['active-filter','active'],['archive-filter','archived']]) $(id).addEventListener('click',() => { state.filter = filter; renderTasks(); save(); });
+    $('archive-task').addEventListener('click',archiveCurrent);
+    $('composer-form').addEventListener('submit',submitQuestion);
+    $('prompt').addEventListener('input',() => { currentTask().draft = $('prompt').value; clearError(); renderComposer(); clearTimeout(draftTimer); draftTimer = setTimeout(save,300); });
+    $('prompt').addEventListener('keydown',event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!runs.has(state.activeId)) submitQuestion(); } });
+    $('reading-pane').addEventListener('scroll',() => { const pane = $('reading-pane'); followLatest = pane.scrollHeight - pane.clientHeight - pane.scrollTop < 90; updateLatest(); },{passive:true});
+    $('latest-button').addEventListener('click',scrollLatest);
+    $('reading-pane').addEventListener('click',async event => {
+      const promptButton = event.target.closest('[data-prompt]'); if (promptButton) { $('prompt').value = promptButton.dataset.prompt; currentTask().draft = $('prompt').value; renderComposer(); save(); $('prompt').focus(); }
+      const sourceButton = event.target.closest('[data-source]'); if (sourceButton) { setDetailTab('sources'); toggleDetails(true); const disclosure = $('source-toggle-'+sourceButton.dataset.source); if (disclosure) { $(disclosure.getAttribute('aria-controls')).hidden = false; disclosure.setAttribute('aria-expanded','true'); disclosure.innerHTML = '收起示例摘录'+icon('chevron'); disclosure.focus(); } }
+      const followButton = event.target.closest('[data-followup]'); if (followButton) { if (currentTask().archived) { notify('请先恢复这项归档研究。'); return; } $('prompt').focus(); }
+      const copyButton = event.target.closest('[data-copy]');
+      if (copyButton) { const article = $('message-'+copyButton.dataset.copy), msg = currentTask().messages.find(m => m.id === copyButton.dataset.copy); if (!msg) return; const text = msg.kind === 'knowledge' ? [...article.children].filter(el => !el.classList.contains('answer-actions') && !el.classList.contains('answer-byline') && !el.classList.contains('run-note')).map(el => el.innerText).join('\n\n') : msg.text;
+        try { if (!navigator.clipboard?.writeText) throw Error('Clipboard unavailable'); await navigator.clipboard.writeText(text); notify('研究结果已复制。'); }
+        catch { const range = document.createRange(); range.selectNodeContents(article); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); notify('已选中结果，请使用系统复制操作。'); }
+      }
+    });
+    $('sources-pane').addEventListener('click',event => { const button = event.target.closest('[data-excerpt]'); if (!button) return; const expanded = button.getAttribute('aria-expanded') !== 'true'; button.setAttribute('aria-expanded',String(expanded)); $(button.getAttribute('aria-controls')).hidden = !expanded; button.innerHTML = (expanded ? '收起示例摘录' : '展开示例摘录')+icon('chevron'); });
+    for (const tab of ['execution','sources']) $(tab+'-tab').addEventListener('click',() => setDetailTab(tab));
+    document.querySelector('.detail-tabs').addEventListener('keydown',event => { if (['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) { event.preventDefault(); setDetailTab(event.key === 'Home' ? 'execution' : event.key === 'End' ? 'sources' : activeDetailTab === 'execution' ? 'sources' : 'execution',true); } });
+    $('toggle-details').addEventListener('click',() => toggleDetails()); $('close-details').addEventListener('click',() => toggleDetails(false));
+    $('open-nav').addEventListener('click',() => openDrawer('nav')); $('close-nav').addEventListener('click',() => closeDrawers()); $('drawer-backdrop').addEventListener('click',() => closeDrawers());
+    for (const media of [desktopMedia,mobileMedia]) media.addEventListener('change',() => { const previousDrawer = drawer; closeDrawers(false); if (previousDrawer) $('toggle-details').focus(); updateLatest(); });
+    for (const id of ['settings-button','composer-model']) $(id).addEventListener('click',() => openDialog('settings-dialog'));
+    document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click',() => $(button.dataset.closeDialog).close()));
+    document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('close',() => { if (!document.activeElement || document.activeElement === document.body || !document.activeElement.getClientRects().length) $('prompt').disabled ? $('archive-task').focus() : $('prompt').focus(); }));
+    $('autofollow-switch').addEventListener('click',() => { settingsDraft.follow = !settingsDraft.follow; $('autofollow-switch').setAttribute('aria-checked',String(settingsDraft.follow)); });
+    $('disconnect-demo').addEventListener('click',() => { settingsDraft.connected = !settingsDraft.connected; renderConnection(); }); $('check-connection').addEventListener('click',() => renderConnection(true));
+    $('settings-form').addEventListener('submit',event => { event.preventDefault(); settingsDraft.mode = $('model-select').value; settingsDraft.speed = $('speed-select').value; state.settings = {...settingsDraft}; if (!state.settings.connected) [...runs.keys()].forEach(id => stopRun(id,'演示连接已断开，已生成的文字保留在历史中。')); save(); renderComposer(); clearError(); $('settings-dialog').close(); notify('设置已保存，将用于后续回答。'); });
+    document.addEventListener('keydown',event => {
+      if (document.querySelector('dialog[open]')) return;
+      if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'n') { event.preventDefault(); openDialog('new-task-dialog'); return; }
+      if (!drawer) return;
+      if (event.key === 'Escape') { event.preventDefault(); closeDrawers(); }
+      if (event.key === 'Tab') { const panel = $(drawer === 'nav' ? 'sidebar' : 'details-panel'); const controls = [...panel.querySelectorAll('button:not(:disabled),input:not(:disabled),a[href],[tabindex="0"]')].filter(el => el.getClientRects().length); const first = controls[0], last = controls[controls.length-1]; if (!first) return; if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) { event.preventDefault(); first.focus(); } }
+    });
+    window.addEventListener('pagehide',save); document.addEventListener('visibilitychange',() => { if (document.visibilityState === 'hidden') save(); });
+    renderAll(); save(); if (recoveryNotice) notify(recoveryNotice); else if (recoveredRuns) notify('上次生成已中断，部分结果已恢复。');
+  </script>
+</body>
+</html>

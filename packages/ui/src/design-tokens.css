@@ -1,0 +1,20 @@
+:root {
+  --bg: #edf2f5;
+  --surface: #f8fafb;
+  --fg: #263b4a;
+  --muted: #586e7e;
+  --border: #bac9d3;
+  --accent: #4b6d87;
+  --accent-hover: #3a576e;
+  --accent-soft: #dde7ee;
+  --highlight: #b6ccd9;
+  --ink: #263e50;
+  --on-ink: #f4f8fa;
+  --danger: #8a5058;
+  --success: #476959;
+  --font-body: 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+  --font-note: 'Cascadia Code', Consolas, 'Microsoft YaHei UI', monospace;
+  --rail-width: 64px;
+  --index-width: 264px;
+  --reading-width: 760px;
+}

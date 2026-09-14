@@ -55,6 +55,7 @@ export function getWorkspaceSessionsPath(workspaceRootPath: string): string {
 }
 
 export function getSessionFilePath(workspaceRootPath: string, sessionId: string): string {
+  validateSessionId(sessionId);
   return join(getSessionPath(workspaceRootPath, sessionId), 'session.jsonl');
 }
 
@@ -108,7 +109,7 @@ export function listSessionIds(workspaceRootPath: string): string[] {
  */
 export async function createSession(
   workspaceRootPath: string,
-  options?: { id?: string; name?: string; model?: string; thinkingLevel?: string; provider?: string },
+  options?: { id?: string; name?: string; model?: string; thinkingLevel?: string; provider?: string; apiProvider?: string },
 ): Promise<StoredSession> {
   const existing = listSessionIds(workspaceRootPath);
   const id = options?.id ?? generateUniqueSessionId(existing);
@@ -126,6 +127,7 @@ export async function createSession(
     model: options?.model,
     thinkingLevel: options?.thinkingLevel,
     provider: options?.provider,
+    apiProvider: options?.apiProvider,
     workingDirectory: sessionDir,
     isFlagged: false,
     isArchived: false,
@@ -174,7 +176,26 @@ export function persistSession(session: StoredSession): void {
 /** Persist immediately and wait (used for tests and shutdown). */
 export async function persistSessionNow(session: StoredSession): Promise<void> {
   sessionPersistenceQueue.enqueue(session);
-  await sessionPersistenceQueue.flush(session.id);
+  await sessionPersistenceQueue.flush(session.id, session.workspaceRootPath);
+}
+
+const mutations = new Map<string, Promise<unknown>>();
+const deleting = new Set<string>();
+/** Serialize read-modify-write too, otherwise concurrent appends lose messages. */
+export async function mutateSession(root: string, id: string, mutate: (session: StoredSession) => void): Promise<StoredSession | null> {
+  const key = getSessionFilePath(root, id);
+  if (deleting.has(key)) throw new Error('Session is being deleted');
+  const previous = mutations.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => {}).then(async () => {
+    const session = loadSession(root, id);
+    if (!session) return null;
+    mutate(session);
+    await persistSessionNow(session);
+    return session;
+  });
+  mutations.set(key, run);
+  try { return await run; }
+  finally { if (mutations.get(key) === run) mutations.delete(key); }
 }
 
 /** Append messages and persist. */
@@ -183,12 +204,10 @@ export async function appendMessages(
   sessionId: string,
   messages: StoredMessage[],
 ): Promise<StoredSession | null> {
-  const session = loadSession(workspaceRootPath, sessionId);
-  if (!session) return null;
-  session.messages.push(...messages);
-  session.lastUsedAt = Date.now();
-  await persistSessionNow(session);
-  return session;
+  return mutateSession(workspaceRootPath, sessionId, session => {
+    session.messages.push(...messages);
+    session.lastUsedAt = Date.now();
+  });
 }
 
 /**
@@ -200,11 +219,7 @@ export async function updateSessionConfig(
   sessionId: string,
   updates: Partial<SessionConfig>,
 ): Promise<StoredSession | null> {
-  const session = loadSession(workspaceRootPath, sessionId);
-  if (!session) return null;
-  Object.assign(session, updates);
-  await persistSessionNow(session);
-  return session;
+  return mutateSession(workspaceRootPath, sessionId, session => { Object.assign(session, updates); });
 }
 
 /** Archive a session — data retained, only the flag flips. */
@@ -248,11 +263,25 @@ export async function markSessionRead(
 
 /** Delete a session — removes the whole directory. Workspace data untouched. */
 export function deleteSession(workspaceRootPath: string, sessionId: string): boolean {
-  sessionPersistenceQueue.cancel(sessionId);
+  validateSessionId(sessionId);
+  sessionPersistenceQueue.cancel(sessionId, workspaceRootPath);
   const sessionDir = getSessionPath(workspaceRootPath, sessionId);
   if (!existsSync(sessionDir)) return false;
   rmSync(sessionDir, { recursive: true, force: true });
   return true;
+}
+
+/** RPC deletion drains mutations and writes before removing the directory. */
+export async function deleteSessionSafely(root: string, id: string): Promise<boolean> {
+  const key = getSessionFilePath(root, id);
+  if (deleting.has(key)) throw new Error('Session is being deleted');
+  deleting.add(key);
+  try {
+    await mutations.get(key)?.catch(() => {});
+    sessionPersistenceQueue.cancel(id, root);
+    await sessionPersistenceQueue.waitForWrites(id, root).catch(() => {});
+    return deleteSession(root, id);
+  } finally { deleting.delete(key); }
 }
 
 /** Update the effective working directory (session config, not the folder). */

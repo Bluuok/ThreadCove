@@ -1,20 +1,9 @@
-#!/usr/bin/env bun
-/**
- * Electron dev launcher.
- * Builds main + preload with esbuild, then starts Electron.
- */
-
 import { $ } from 'bun';
-import { spawn } from 'child_process';
-
-console.log('[dev] building main + preload…');
-await $`bun run build:main`;
-await $`bun run build:preload`;
-
-console.log('[dev] starting electron…');
-const electron = spawn('npx', ['electron', '.'], {
-  cwd: import.meta.dir + '/..',
-  stdio: 'inherit',
-  shell: true,
-});
-electron.on('exit', (code) => process.exit(code ?? 0));
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+const cwd = fileURLToPath(new URL('..', import.meta.url));
+await $`bun run build`.cwd(cwd);
+const require = createRequire(import.meta.url);
+const child = spawn(require('electron') as string, ['.'], { cwd, stdio: 'inherit' });
+child.on('exit', code => process.exit(code ?? 0));

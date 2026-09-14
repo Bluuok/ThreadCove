@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 credentials.enc
 .threadcove/
 *.tmp
+
+.threadcove-workspace/
+artifacts/qa/

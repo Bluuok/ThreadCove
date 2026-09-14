@@ -44,3 +44,6 @@ jobs:
 
       - name: Test
         run: bun test
+
+      - name: Build WebUI and Electron
+        run: bun run build

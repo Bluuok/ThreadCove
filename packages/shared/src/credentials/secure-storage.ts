@@ -38,7 +38,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { userInfo, homedir } from 'os';
 import { join, dirname } from 'path';
 // File format constants
-const MAGIC_BYTES = Buffer.from('TC01\0\0\0');
+const MAGIC_BYTES = Buffer.from('TC01\0\0\0\0');
 const HEADER_SIZE = 64;
 const SALT_SIZE = 32;
 const IV_SIZE = 12;

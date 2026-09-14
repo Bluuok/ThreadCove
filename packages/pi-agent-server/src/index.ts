@@ -1,236 +1,143 @@
 #!/usr/bin/env bun
-/**
- * Pi Agent Server (R03 support package).
- *
- * Out-of-process Pi agent server communicating via JSONL over stdio.
- * Wraps @earendil-works/pi-coding-agent and talks to the host (main
- * process) with line-delimited JSON.
- *
- * Process isolation: the Pi SDK's heavy ESM dependency tree runs here,
- * so a crash never takes down the host. All source-tool (MCP/API)
- * executions are NOT done here — the server sends `tool_execute_request`
- * lines back to the host and waits for `tool_execute_response`, so
- * credentials only ever live in the host process.
- *
- * JSONL protocol (host → server, stdin):
- *   { type: 'init', apiKey, model, cwd, thinkingLevel, sessionId, sessionPath, workingDirectory, ... }
- *   { type: 'prompt', id, message, systemPrompt }
- *   { type: 'abort' }
- *   { type: 'steer', message }
- *   { type: 'register_tools', tools: [{ name, description, inputSchema }] }
- *   { type: 'tool_execute_response', requestId, result: { content, isError } }
- *   { type: 'shutdown' }
- *
- * JSONL protocol (server → host, stdout):
- *   { type: 'ready', sessionId }
- *   { type: 'event', event: AgentSessionEvent }        — raw Pi SDK event, adapted host-side
- *   { type: 'tool_execute_request', requestId, toolName, args }
- *   { type: 'mini_completion_result', id, text }
- *   { type: 'session_id_update', sessionId }
- *   { type: 'error', message, code? }
- *
- * Debug output goes to stderr so it never corrupts the JSONL stream.
- */
-
+/** Isolated Pi SDK process. Only explicitly registered host tools are enabled. */
 import { createInterface } from 'node:readline';
+import { AuthStorage, ModelRegistry, createAgentSession, DefaultResourceLoader, SettingsManager, SessionManager, type AgentSession, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { complete, type Message } from '@earendil-works/pi-ai/compat';
 
-// ============================================================
-// Types — JSONL protocol
-// ============================================================
-
-/** Tool definition sent by the host for proxy tools (MCP/API sources). */
-export interface ProxyToolDef {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
+export interface ProxyToolDef { name: string; description: string; inputSchema: Record<string, unknown> }
 export interface InitMessage {
-  type: 'init';
-  apiKey: string;
-  model: string;
-  cwd: string;
-  thinkingLevel: string;
-  sessionId: string;
-  sessionPath: string;
-  workingDirectory: string;
-  workspaceRootPath?: string;
-  systemPrompt?: string;
+  type: 'init'; apiKey: string; apiProvider?: string; model: string; cwd: string;
+  thinkingLevel: string; sessionId: string; workspaceId?: string; sessionPath: string;
+  workingDirectory: string; systemPrompt?: string;
+  history?: Array<{ type: string; content: string }>;
 }
-
-export type InboundMessage =
-  | InitMessage
-  | { type: 'prompt'; id: string; message: string; systemPrompt?: string }
-  | { type: 'abort' }
-  | { type: 'steer'; message: string }
+export type InboundMessage = InitMessage
+  | { type: 'prompt'; id: string; message: string; model?: string; thinkingLevel?: string; systemPrompt?: string }
+  | { type: 'abort'; promptId?: string } | { type: 'steer'; message: string }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
-  | { type: 'mini_completion'; id: string; prompt: string }
-  | { type: 'shutdown' };
-
+  | { type: 'mini_completion'; id: string; prompt: string } | { type: 'shutdown' };
 export type OutboundMessage =
   | { type: 'ready'; sessionId: string | null }
-  | { type: 'event'; event: Record<string, unknown> }
-  | { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
+  | { type: 'event'; promptId?: string; event: Record<string, unknown> }
+  | { type: 'tool_execute_request'; promptId?: string; requestId: string; toolName: string; args: Record<string, unknown> }
   | { type: 'mini_completion_result'; id: string; text: string | null }
-  | { type: 'session_id_update'; sessionId: string }
-  | { type: 'error'; message: string; code?: string };
-
-// ============================================================
-// JSONL I/O
-// ============================================================
-
-export function send(msg: OutboundMessage): void {
-  process.stdout.write(JSON.stringify(msg) + '\n');
-}
-
-export function debugLog(message: string): void {
-  process.stderr.write(`[pi-server] ${message}\n`);
-}
-
-// ============================================================
-// State
-// ============================================================
-
-interface PendingToolExecution {
-  resolve: (result: { content: string; isError: boolean }) => void;
-  reject: (error: Error) => void;
-}
-
-let proxyToolDefs: ProxyToolDef[] = [];
-/** Proxy tool executions awaiting a host response (credentials stay host-side). */
-const pendingToolExecutions = new Map<string, PendingToolExecution>();
-let requestCounter = 0;
-
-// ============================================================
-// Tool execution proxy
-// ============================================================
-
-/**
- * Execute a proxy tool by asking the host. The Pi SDK's custom tool
- * `execute` calls this; the promise resolves when the host writes a
- * `tool_execute_response` line back.
- */
-export function executeToolViaHost(
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<{ content: string; isError: boolean }> {
-  const requestId = `treq-${++requestCounter}-${Date.now()}`;
+  | { type: 'error'; promptId?: string; message: string; code?: string };
+export function send(message: OutboundMessage): void { process.stdout.write(JSON.stringify(message) + '\n'); }
+export function debugLog(message: string): void { process.stderr.write(`[pi-server] ${message}\n`); }
+let config: InitMessage;
+let session: AgentSession | undefined;
+let registry: ModelRegistry;
+let tools: ProxyToolDef[] = [];
+let promptId: string | undefined;
+let serial = Promise.resolve();
+let counter = 0;
+const cancelledPrompts = new Set<string>();
+const pending = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void; reject: (error: Error) => void }>();
+function thinkingLevel(value: string) { return value === 'off' ? 'off' : value === 'low' ? 'low' : value === 'max' || value === 'xhigh' ? 'max' : value === 'high' ? 'high' : 'medium'; }
+export function executeToolViaHost(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<{ content: string; isError: boolean }> {
   return new Promise((resolve, reject) => {
-    pendingToolExecutions.set(requestId, { resolve, reject });
-    send({ type: 'tool_execute_request', requestId, toolName, args });
-    // Timeout guard — a lost response must not wedge the server forever.
-    const timer = setTimeout(() => {
-      if (pendingToolExecutions.has(requestId)) {
-        pendingToolExecutions.delete(requestId);
-        reject(new Error(`Tool execution timed out in host: ${toolName}`));
-      }
-    }, 120_000);
-    const originalResolve = resolve;
-    // Clear timer on settle by wrapping resolve/reject
-    pendingToolExecutions.set(requestId, {
-      resolve: (result) => {
-        clearTimeout(timer);
-        originalResolve(result);
-      },
-      reject: (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    });
+    if (signal?.aborted) { reject(new Error('Tool execution aborted')); return; }
+    const requestId = `tool-${++counter}`;
+    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); pending.delete(requestId); };
+    const abort = () => { cleanup(); reject(new Error('Tool execution aborted')); };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Host tool timed out')); }, 120_000);
+    pending.set(requestId, { resolve: value => { cleanup(); resolve(value); }, reject: error => { cleanup(); reject(error); } });
+    signal?.addEventListener('abort', abort, { once: true });
+    send({ type: 'tool_execute_request', promptId, requestId, toolName, args });
   });
 }
-
-// ============================================================
-// Message dispatch
-// ============================================================
-
-async function handleMessage(msg: InboundMessage): Promise<void> {
+async function initialize(msg: InitMessage): Promise<void> {
+  config = msg;
+  if (!msg.apiKey) throw new Error('Pi API key is required');
+  const authStorage = AuthStorage.inMemory();
+  const provider = msg.apiProvider ?? 'anthropic';
+  authStorage.setRuntimeApiKey(provider, msg.apiKey);
+  registry = ModelRegistry.inMemory(authStorage);
+  if (provider === 'opencode-go') registry.registerProvider(provider, {
+    baseUrl: 'https://opencode.ai/zen/go/v1', api: 'openai-completions', apiKey: msg.apiKey,
+    headers: { 'User-Agent': 'ThreadCove/0.1.0', 'x-opencode-session': `${msg.workspaceId ?? 'workspace'}/${msg.sessionId}` },
+    models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', reasoning: true, input: ['text', 'image'],
+      thinkingLevelMap: { minimal: null, low: null, medium: null, high: 'high', max: 'max' },
+      contextWindow: 1_000_000, maxTokens: 384_000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      compat: { supportsStore: false, supportsDeveloperRole: false, maxTokensField: 'max_tokens', requiresReasoningContentOnAssistantMessages: true, thinkingFormat: 'deepseek' } }],
+  });
+  const model = registry.find(provider, msg.model);
+  if (!model) throw new Error(`Unknown Pi model: ${provider}/${msg.model}`);
+  const settingsManager = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } });
+  const resourceLoader = new DefaultResourceLoader({ cwd: msg.cwd, agentDir: msg.cwd, settingsManager,
+    noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    systemPrompt: msg.systemPrompt ?? 'You are ThreadCove, a research assistant. Use only tools explicitly made available.' });
+  await resourceLoader.reload();
+  const customTools: ToolDefinition[] = tools.map(tool => ({ name: tool.name, label: tool.name, description: tool.description,
+    parameters: tool.inputSchema as ToolDefinition['parameters'],
+    async execute(_id, args, signal) {
+      const result = await executeToolViaHost(tool.name, args as Record<string, unknown>, signal);
+      if (result.isError) throw new Error(result.content);
+      return { content: [{ type: 'text', text: result.content }], details: {} };
+    },
+  }));
+  ({ session } = await createAgentSession({ cwd: msg.cwd, agentDir: msg.cwd, authStorage, modelRegistry: registry, model,
+    thinkingLevel: thinkingLevel(msg.thinkingLevel), settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(msg.cwd),
+    noTools: 'builtin', tools: tools.map(tool => tool.name), customTools }));
+  const streamFn = session.agent.streamFn;
+  session.agent.streamFn = (m, context, options) => streamFn(m, context, { ...options, maxTokens: 8192 });
+  session.agent.state.messages = (msg.history ?? []).filter(m => m.type === 'user' || m.type === 'assistant').map(m => m.type === 'user'
+    ? { role: 'user', content: m.content, timestamp: Date.now() }
+    : { role: 'assistant', content: [{ type: 'text', text: m.content }], api: model.api, provider: model.provider, model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'stop', timestamp: Date.now() });
+  session.subscribe(event => { if (promptId) send({ type: 'event', promptId, event: event as unknown as Record<string, unknown> }); });
+  send({ type: 'ready', sessionId: msg.sessionId });
+}
+async function handle(msg: InboundMessage): Promise<void> {
   switch (msg.type) {
-    case 'init': {
-      debugLog(`init: model=${msg.model} cwd=${msg.cwd}`);
-      send({ type: 'ready', sessionId: msg.sessionId });
-      break;
-    }
-
-    case 'register_tools': {
-      proxyToolDefs = msg.tools;
-      debugLog(`registered ${proxyToolDefs.length} proxy tools`);
-      break;
-    }
-
-    case 'tool_execute_response': {
-      const pending = pendingToolExecutions.get(msg.requestId);
-      if (pending) {
-        pendingToolExecutions.delete(msg.requestId);
-        pending.resolve(msg.result);
-      } else {
-        debugLog(`no pending tool execution for ${msg.requestId}`);
-      }
-      break;
-    }
-
+    case 'init': await initialize(msg); break;
+    case 'register_tools': tools = msg.tools; break;
     case 'prompt': {
-      // Real Pi SDK session happens here. In this skeleton, the heavy Pi
-      // SDK wiring lands with Gate 1's PiAgent work; the protocol frame
-      // (prompt → events → completion) is exercised end-to-end via the
-      // host-side tests with a mock child process.
-      debugLog('prompt received — Pi SDK session wiring arrives with R03 implementation');
-      send({ type: 'error', message: 'Pi SDK session not yet wired (Gate 1)', code: 'not_implemented' });
+      if (cancelledPrompts.delete(msg.id)) return;
+      if (!session) throw new Error('Pi session is not initialized');
+      promptId = msg.id;
+      try {
+        if (msg.thinkingLevel) session.setThinkingLevel(thinkingLevel(msg.thinkingLevel));
+        if (msg.model && msg.model !== session.model?.id) {
+          const model = registry.find(config.apiProvider ?? 'anthropic', msg.model);
+          if (!model) throw new Error(`Unknown Pi model: ${msg.model}`);
+          await session.setModel(model);
+        }
+        await session.prompt(msg.message);
+      } catch (error) {
+        send({ type: 'error', promptId: msg.id, message: error instanceof Error ? error.message : 'Pi prompt failed' });
+      } finally { cancelledPrompts.delete(msg.id); promptId = undefined; }
       break;
     }
-
-    case 'steer': {
-      debugLog(`steer requested: ${msg.message.slice(0, 80)}`);
-      break;
-    }
-
-    case 'abort': {
-      debugLog('abort requested');
-      break;
-    }
-
     case 'mini_completion': {
-      send({ type: 'mini_completion_result', id: msg.id, text: null });
+      try {
+        if (!session?.model) throw new Error('Pi session is not initialized');
+        const auth = await registry.getApiKeyAndHeaders(session.model);
+        const result = await complete(session.model, { messages: [{ role: 'user', content: msg.prompt, timestamp: Date.now() } as Message] },
+          { ...auth, maxTokens: 512, signal: AbortSignal.timeout(25_000) });
+        send({ type: 'mini_completion_result', id: msg.id, text: result.content.filter(c => c.type === 'text').map(c => c.text).join('') || null });
+      } catch { send({ type: 'mini_completion_result', id: msg.id, text: null }); }
       break;
     }
-
-    case 'shutdown': {
-      process.exit(0);
-      break;
-    }
+    case 'shutdown': await session?.abort(); session?.dispose(); process.exit(0);
   }
 }
-
-// ============================================================
-// Main loop
-// ============================================================
-
-function main(): void {
+export function main(): void {
   const rl = createInterface({ input: process.stdin });
-  rl.on('line', (line: string) => {
-    if (!line.trim()) return;
+  rl.on('line', line => {
     let msg: InboundMessage;
-    try {
-      msg = JSON.parse(line) as InboundMessage;
-    } catch {
-      // Bad JSONL line: log to stderr and keep the stream alive.
-      debugLog(`invalid JSONL line (ignored): ${line.slice(0, 200)}`);
+    try { msg = JSON.parse(line) as InboundMessage; } catch { debugLog('invalid JSONL ignored'); return; }
+    // Control and tool replies must bypass the serial prompt chain.
+    if (msg.type === 'tool_execute_response') { pending.get(msg.requestId)?.resolve(msg.result); return; }
+    if (msg.type === 'abort') {
+      if (msg.promptId) cancelledPrompts.add(msg.promptId);
+      if (!msg.promptId || msg.promptId === promptId) void session?.abort();
       return;
     }
-    void handleMessage(msg).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      debugLog(`handler error: ${message}`);
-      send({ type: 'error', message });
-    });
+    if (msg.type === 'steer') { void session?.steer(msg.message).catch(() => undefined); return; }
+    serial = serial.then(() => handle(msg)).catch(error => send({ type: 'error', message: error instanceof Error ? error.message : 'Pi initialization failed', code: 'initialization_failed' }));
   });
-  rl.on('close', () => {
-    debugLog('stdin closed, shutting down');
-    process.exit(0);
-  });
+  rl.on('close', () => { session?.dispose(); process.exit(0); });
 }
-
-// Only run the loop when executed directly (not when imported by tests).
-if (import.meta.main) {
-  main();
-}
+if (import.meta.main) main();

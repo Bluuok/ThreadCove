@@ -14,7 +14,10 @@
  * - R12: transport broadcast to every connected client
  */
 
-import type { AgentEvent } from '@threadcove/core/types';
+import type { AgentEvent, StoredMessage } from '@threadcove/core/types';
+import { randomUUID } from 'node:crypto';
+import { loadSession, mutateSession, listSessionHeaders } from '@threadcove/shared/sessions';
+import { RunTranscript } from './run-transcript.ts';
 import type { WsRpcServer } from '../transport/server.ts';
 import { createBackend } from '@threadcove/shared/agent';
 import type { AgentBackend, BackendConfig } from '@threadcove/shared/agent';
@@ -42,9 +45,12 @@ interface ActiveSession {
   /** Events streamed by chat() — concurrency guard: one turn at a time. */
   processing: boolean;
   abortRequested: boolean;
+  task?: Promise<void>;
 }
 
 export class SessionManager {
+  private locks = new Set<string>();
+  private submissions = new Map<string, { message: string; result: Promise<{ accepted: boolean; runId: string }> }>();
   private active = new Map<string, ActiveSession>(); // key: `${workspaceId}:${sessionId}`
   private workspaceRoots = new Map<string, string>();
 
@@ -58,6 +64,16 @@ export class SessionManager {
   /** Register a workspace root (normally loaded from R08 workspace storage). */
   registerWorkspace(workspaceId: string, rootPath: string): void {
     this.workspaceRoots.set(workspaceId, rootPath);
+  }
+
+  listWorkspaces() { return [...this.workspaceRoots].map(([id, rootPath]) => ({ id, name: '研究工作区', slug: id, rootPath })); }
+
+  async recoverWorkspace(root: string): Promise<void> {
+    for (const header of listSessionHeaders(root, true)) {
+      if (header.lastRun?.status === 'running') await mutateSession(root, header.id, session => {
+        session.lastRun = { ...header.lastRun!, status: 'interrupted' };
+      });
+    }
   }
 
   private key(workspaceId: string, sessionId: string): string {
@@ -77,6 +93,8 @@ export class SessionManager {
     permissionMode?: PermissionMode;
     workingDirectory: string;
     apiKey?: string;
+    apiProvider?: string;
+    history?: StoredMessage[];
   }): AgentBackend {
     const key = this.key(opts.workspaceId, opts.sessionId);
     const existing = this.active.get(key);
@@ -92,9 +110,11 @@ export class SessionManager {
       thinkingLevel: opts.thinkingLevel,
       permissionMode: opts.permissionMode,
       apiKey: opts.apiKey,
+      apiProvider: opts.apiProvider,
     };
 
     const backend = this.createBackendFn?.(config) ?? createBackend(config);
+    backend.restoreHistory?.(opts.history ?? []);
     if (this.mcpPool && 'setToolExecutor' in backend) {
       // Pi subprocess executes source tools via the host pool —
       // credentials never enter the subprocess.
@@ -113,6 +133,108 @@ export class SessionManager {
 
   isProcessing(workspaceId: string, sessionId: string): boolean {
     return this.active.get(this.key(workspaceId, sessionId))?.processing ?? false;
+  }
+
+  /** Reserve synchronously, persist acceptance, then run independently of the RPC lifetime. */
+  submitMessage(opts: {
+    workspaceId: string; sessionId: string; message: string; requestId: string;
+    broadcast: (event: AgentEvent | { type: 'user_message'; message: StoredMessage } | { type: 'run_status'; runId: string; status: string; error?: string }) => void;
+  }): Promise<{ accepted: boolean; runId: string }> {
+    const key = this.key(opts.workspaceId, opts.sessionId);
+    const requestKey = JSON.stringify([key, opts.requestId]);
+    const cached = this.submissions.get(requestKey);
+    if (cached) return cached.message === opts.message ? cached.result : Promise.reject(new Error('Request ID already used for another message'));
+    const root = this.getWorkspaceRoot(opts.workspaceId);
+    const entry = this.active.get(key);
+    if (!root || !entry) return Promise.reject(new Error('Session not active'));
+    const stored = loadSession(root, opts.sessionId);
+    const previous = stored?.messages.find(message => message.requestId === opts.requestId);
+    if (previous) return previous.content === opts.message
+      ? Promise.resolve({ accepted: true, runId: previous.runId! })
+      : Promise.reject(new Error('Request ID already used for another message'));
+    if (entry.processing || this.locks.has(key)) return Promise.reject(new Error('Session is busy'));
+    entry.processing = true;
+    entry.abortRequested = false;
+    const runId = randomUUID();
+    const message: StoredMessage = { id: randomUUID(), type: 'user', content: opts.message, timestamp: Date.now(), requestId: opts.requestId, runId };
+    const result = (async () => {
+      try {
+        const saved = await mutateSession(root, opts.sessionId, session => {
+          session.messages.push(message);
+          session.lastRun = { id: runId, requestId: opts.requestId, status: 'running' };
+        });
+        if (!saved) throw new Error('Session not found');
+      } catch (error) {
+        entry.processing = false;
+        this.submissions.delete(requestKey);
+        throw error;
+      }
+      opts.broadcast({ type: 'user_message', message });
+      const transcript = new RunTranscript(root, opts.sessionId, runId);
+      entry.task = (async () => {
+        let status: 'completed' | 'cancelled' | 'failed' = 'completed';
+        let failure: string | undefined;
+        let complete: AgentEvent | undefined;
+        try {
+          if (!entry.abortRequested) for await (const event of entry.backend.chat(opts.message)) {
+            if (entry.abortRequested) break;
+            if (event.type === 'complete') { complete = event; continue; }
+            const visibleEvent = await transcript.consume(event);
+            opts.broadcast(visibleEvent);
+            if (event.type === 'typed_error' || event.type === 'error') {
+              status = 'failed';
+              failure = event.type === 'error' ? event.message : event.error.message;
+            }
+          }
+          if (entry.abortRequested) status = 'cancelled';
+          else if (!complete && status !== 'failed') { status = 'failed'; failure = 'Backend ended before completion'; }
+          await transcript.flush();
+        } catch (error) {
+          status = entry.abortRequested ? 'cancelled' : 'failed';
+          failure = error instanceof Error ? error.message : String(error);
+          try { await transcript.flush(); } catch { /* final status below reports storage failure */ }
+        }
+        try {
+          const saved = await mutateSession(root, opts.sessionId, session => {
+            session.lastRun = { id: runId, requestId: opts.requestId, status, error: failure };
+          });
+          if (!saved) throw new Error('Session disappeared while saving');
+        } catch (error) {
+          status = 'failed';
+          failure = `Save failed: ${error instanceof Error ? error.message : String(error)}`;
+        } finally {
+          entry.processing = false;
+          this.submissions.delete(requestKey);
+        }
+        if (status === 'completed' && complete) opts.broadcast(complete);
+        opts.broadcast({ type: 'run_status', runId, status, error: failure });
+      })();
+      return { accepted: true, runId };
+    })();
+    this.submissions.set(requestKey, { message: opts.message, result });
+    return result;
+  }
+
+  async waitForIdle(workspaceId: string, sessionId: string): Promise<void> {
+    const prefix = JSON.stringify([this.key(workspaceId, sessionId)]).slice(0, -1);
+    await Promise.allSettled([...this.submissions].filter(([key]) => key.startsWith(prefix)).map(([, entry]) => entry.result));
+    await this.active.get(this.key(workspaceId, sessionId))?.task;
+  }
+
+  async withIdleSession<T>(workspaceId: string, sessionId: string, action: () => Promise<T>): Promise<T> {
+    const key = this.key(workspaceId, sessionId);
+    if (this.isProcessing(workspaceId, sessionId) || this.locks.has(key)) throw new Error('Session is busy');
+    this.locks.add(key);
+    try { return await action(); } finally { this.locks.delete(key); }
+  }
+
+  async shutdown(): Promise<void> {
+    for (const entry of this.active.values()) await this.cancel(entry.workspaceId, entry.sessionId);
+    for (const entry of this.active.values()) {
+      await this.waitForIdle(entry.workspaceId, entry.sessionId);
+      entry.backend.destroy();
+    }
+    this.active.clear();
   }
 
   /**

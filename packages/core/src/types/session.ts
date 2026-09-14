@@ -15,6 +15,7 @@ export type SessionStatus = 'todo' | 'in_progress' | 'needs_review' | 'done' | '
  * Session configuration (persisted metadata — the JSONL header subset).
  */
 export interface SessionConfig {
+  lastRun?: { id: string; requestId: string; status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; error?: string };
   id: string;
   /** SDK session ID (captured after first message; backend-specific) */
   sdkSessionId?: string;
@@ -40,6 +41,8 @@ export interface SessionConfig {
   thinkingLevel?: string;
   /** Backend provider for this session ('anthropic' | 'pi') */
   provider?: string;
+  /** Upstream API provider for SDK backends; persisted independently of defaults. */
+  apiProvider?: string;
   /** Archive marker — archived sessions keep their data */
   isArchived?: boolean;
   archivedAt?: number;

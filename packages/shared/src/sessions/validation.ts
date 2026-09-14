@@ -43,7 +43,7 @@ export function sanitizeSessionId(sessionId: string): string {
   if (!sessionId || typeof sessionId !== 'string') {
     return '';
   }
-  return basename(sessionId);
+  return basename(sessionId.replaceAll('\\', '/'));
 }
 
 /** Non-throwing validity check. */

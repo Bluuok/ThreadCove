@@ -11,7 +11,7 @@
  *   true; others forceAbort and return false so the session layer re-queues)
  */
 
-import type { AgentEvent } from '@threadcove/core/types';
+import type { AgentEvent, StoredMessage } from '@threadcove/core/types';
 import type { ThinkingLevel, PermissionMode } from '../../config/models.ts';
 import type { ModelProvider } from '../../config/models.ts';
 import type { EventQueue } from './event-queue.ts';
@@ -50,6 +50,7 @@ export interface ChatOptions {
 // ============================================================
 
 export interface AgentBackend {
+  restoreHistory?(messages: StoredMessage[]): void;
   // ------------------------------------------------------------
   // Chat & lifecycle
   // ------------------------------------------------------------
@@ -198,6 +199,8 @@ export interface BackendConfig {
   permissionMode?: PermissionMode;
   /** API key (injected post-creation, never logged) */
   apiKey?: string;
+  /** Upstream API provider when an SDK backend supports multiple services. */
+  apiProvider?: string;
 }
 
 // ============================================================
