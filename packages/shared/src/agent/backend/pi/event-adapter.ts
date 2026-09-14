@@ -32,7 +32,6 @@ export class PiEventAdapter {
   private subTurnCounter = 0;
   private messageSubTurnId: string | null = null;
   private toolNames: Map<string, string> = new Map();
-  private hasEmittedFinalText = false;
 
   /** Start a new turn — resets per-turn state. */
   startTurn(turnId?: string): void {
@@ -41,7 +40,6 @@ export class PiEventAdapter {
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
     this.toolNames.clear();
-    this.hasEmittedFinalText = false;
   }
 
   /**
@@ -76,10 +74,14 @@ export class PiEventAdapter {
       }
 
       case 'message_end': {
+        const message = rawEvent['message'] as Record<string, unknown> | undefined;
+        if (message?.['role'] && message['role'] !== 'assistant') break;
+        if (message?.['stopReason'] === 'error') {
+          events.push({ type: 'error', message: String(message['errorMessage'] ?? 'Pi model request failed') });
+        }
         // message_end carries the full AgentMessage; extract text blocks.
         const text = this.extractFinalText(rawEvent['message']);
-        if (text && !this.hasEmittedFinalText) {
-          this.hasEmittedFinalText = true;
+        if (text) {
           events.push({
             type: 'text_complete',
             text,
@@ -123,7 +125,6 @@ export class PiEventAdapter {
       case 'agent_end':
         // Turn boundary — nothing to map. PiAgent closes the EventQueue
         // after the child signals agent_end, completing chat()'s stream.
-        this.hasEmittedFinalText = false;
         break;
 
       case 'compaction_start':

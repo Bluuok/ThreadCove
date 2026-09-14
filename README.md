@@ -101,7 +101,7 @@ bun run dev:webui    # 打开 http://localhost:5173
 
 WebUI 启动后，使用 headless 终端输出的带 fragment 引导链接连接；随机 token 只保存在当前浏览器会话。服务默认监听本机，数据位于 `.threadcove-workspace/`。模型可通过 `THREADCOVE_PROVIDER` / `THREADCOVE_MODEL` 配置，任务设置支持持久化模型覆盖。
 
-本次评审整改、兼容边界和验证步骤见 [整改说明](docs/IMPLEMENTATION-REVIEW.md)；OpenDesign 规范与实际前端移植见 [前端设计](docs/FRONTEND-DESIGN.md)。DeepSeek/Claude 真实外部 API 本次未验证；Pi 目前只验证了子进程协议，其真实 SDK 执行仍未完成。
+本次评审整改、兼容边界和验证步骤见 [整改说明](docs/IMPLEMENTATION-REVIEW.md)；OpenDesign 规范与实际前端移植见 [前端设计](docs/FRONTEND-DESIGN.md)。[OpenCode Go 接入说明](docs/OPENCODE-GO.md) 提供本机加密配置与真实 Pi SDK 验证方法。OpenCode Go / DeepSeek V4.1 Flash 已通过真实 SDK、宿主工具往返及 Web/Electron 联调；DeepSeek 直连接口和 Claude API 本次未验证。
 
 **验证流式对话**（需要真实密钥，无需 UI）：
 
@@ -197,8 +197,8 @@ event    { id, type:'event',    channel:'session:event', args:[{ sessionId, even
 - **不做**：RAG/向量库（主打实时抓取+多源核对）、多 Agent 编排（多任务=多 Session）、Memory/跨任务知识复用、完整 OAuth（凭据手动粘贴，只留 `getToken` 钩子）
 - **MCP 只到统一转换层**：官方 SDK Client + 代理工具组装，不自研 JSON-RPC/握手
 - WebUI 定位是「验证同一套逻辑能否复用」的接续查看面，不是全功能第二产品
-- Pi 后端的子进程协议帧已被 mock 测试全覆盖；`createAgentSession` 的进程内完整接线为后续工作
-- 所有验证均为定性验证（真实 API 冒烟 + 115 项确定性测试），无编造量化指标
+- Pi 后端已接入真实 `createAgentSession`，默认仅允许显式注册的宿主工具；搜索服务和多 Agent 编排仍需另外接线
+- 当前验证：146 项测试通过，5 项 DeepSeek 直连 live 测试跳过；另有真实 OpenCode Go API / Pi SDK / Web / Electron 验收。1M 上下文为模型配置能力，尚未实测满窗口
 
 ## License
 

@@ -93,6 +93,7 @@ export class SessionManager {
     permissionMode?: PermissionMode;
     workingDirectory: string;
     apiKey?: string;
+    apiProvider?: string;
     history?: StoredMessage[];
   }): AgentBackend {
     const key = this.key(opts.workspaceId, opts.sessionId);
@@ -109,6 +110,7 @@ export class SessionManager {
       thinkingLevel: opts.thinkingLevel,
       permissionMode: opts.permissionMode,
       apiKey: opts.apiKey,
+      apiProvider: opts.apiProvider,
     };
 
     const backend = this.createBackendFn?.(config) ?? createBackend(config);

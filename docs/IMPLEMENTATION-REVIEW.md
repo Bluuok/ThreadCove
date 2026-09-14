@@ -42,11 +42,21 @@ Windows 本次结果：135 个测试通过，5 个需要真实 DeepSeek 密钥�
 - 修正 Linux CI 的路径测试假设：工作区在用户目录之外时允许保留绝对路径。现在解析 JSON 校验工作目录占位符与路径往返，不再用原始字符串断言误判 Linux `/tmp`，也避免 Windows JSON 转义造成假通过。
 - 模型联调使用本地 SSE fixture；真实 DeepSeek/Claude API 和提供商权限闭环未验证，Pi 实际 SDK 执行仍未完成。这些边界没有因为本次测试通过而改变。
 
+## 2026-09-14 OpenCode Go / Pi SDK 接入
+
+- Pi 子进程已真正调用安装的 0.80.6 SDK；OpenCode Go 使用 `deepseek-v4.1-flash`、官方 `/zen/go/v1` 接口和稳定会话请求头。
+- 模型密钥存于仓库外的专用加密文件，SDK 仅接收内存注入的模型凭据。修复既有加密文件 magic 长度不一致导致新进程无法读回的问题，并新增跨实例回归。
+- 禁用自动发现的项目资源及内置文件/Shell 工具，仅启用显式宿主代理工具。修复多轮工具调用的文本事件、初始化失败、异常退出、排队取消与跨轮旧事件隔离；恢复 ThreadCove 文本历史，不宣称完整 SDK 原生会话恢复。
+- 全仓 146 passed / 5 direct-DeepSeek live tests skipped；typecheck、lint、Web/Electron 构建通过。原有 UI 流程回归通过。
+- 独立配置审查发现并修复未知 Pi 上游误用凭据、上游未随任务保存和无关凭据阻断启动的问题；上游白名单、每任务上游恢复及专用凭据路由回归通过。
+- `bun scripts/verify-opencode-go.ts` 真实通过 SDK 流式输出、测试工具往返、Web 及 Electron 页面请求。截图和 JSON 记录位于 `artifacts/qa/opencode-go/`（不提交）。API 验收不是模型自称成功，而是检查真实返回的文本标记与工具随机值。
+- 1,000,000 tokens 是官方模型元数据和当前配置；未进行满窗口付费压力测试。搜索服务、多 Agent 编排、DeepSeek 直连及 Claude API 不在本轮真实验证范围。
+
 ## 数据兼容与边界
 
 - 保留原有 JSONL 格式，新增字段可选，无批量迁移。文件 RPC 的相对路径现在以 `sessions/<id>/data/` 为根；旧调用若要访问产物，需将产物放在该目录。会话 JSONL 不通过文件 RPC 暴露。
 - 首段及约 750ms 间隔保存流式检查点，正常完成、取消、关闭时刷新；进程强制中止可能丢失最近一个检查点之后的内容。重启将残留 running 标为 interrupted。
 - 累计文本快照用于修复断线期间缺段，会增加长回复的传输量。当前运行时面向单进程本地使用，不提供跨进程存储锁或分布式恢复。
-- 真实 DeepSeek/Claude 外部 API 本次未验证。Claude 恢复的是文本上下文，不是 SDK 原生 resume。Pi 子进程协议测试通过，但真实 SDK 执行仍是未完成的既有实现，不能据此宣称 Pi 可用于生产研究。
+- DeepSeek 直连/Claude 外部 API 本次未验证；OpenCode Go / Pi SDK 已按上一节验证。Claude 与 Pi 的重启恢复均以 ThreadCove 保存的文本历史为主，不等同于完整 SDK 原生 resume，也不代表完整研究调度器已经实现。
 - 来源与文件面板展示已有数据；本次没有新增来源配置向导、完整研究调度器或虚构搜索结果。Web 文件选择明确报不支持。
 - 服务默认只监听 loopback，随机 token 且校验 Origin；远程部署仍需单独配置 TLS 与部署边界。

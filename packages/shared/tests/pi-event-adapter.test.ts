@@ -20,7 +20,7 @@ describe('PiEventAdapter', () => {
     expect(delta.turnId).toContain('sub1');
   });
 
-  test('message_end → text_complete (final, once per turn)', () => {
+  test('message_end preserves each assistant answer across tool rounds', () => {
     const adapter = new PiEventAdapter();
     adapter.startTurn();
     const events = adapter.adaptEvent({
@@ -31,12 +31,14 @@ describe('PiEventAdapter', () => {
     expect(complete.type).toBe('text_complete');
     expect(complete.text).toBe('done text');
 
-    // Second message_end does not re-emit a final text_complete.
+    // Tool loops can finish several assistant messages in one turn.
     const again = adapter.adaptEvent({
       type: 'message_end',
-      message: { content: [{ type: 'text', text: 'done text' }] },
+      message: { role: 'assistant', content: [{ type: 'text', text: 'final answer' }] },
     });
-    expect(again.find((e) => e.type === 'text_complete')).toBeUndefined();
+    expect(again.find((e) => e.type === 'text_complete')).toMatchObject({ text: 'final answer' });
+    expect(adapter.adaptEvent({ type: 'message_end', message: { role: 'user', content: 'do not echo' } })).toEqual([]);
+    expect(adapter.adaptEvent({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: 'bad auth' } })).toContainEqual({ type: 'error', message: 'bad auth' });
   });
 
   test('tool_execution_start/end → tool_start/tool_result pair', () => {

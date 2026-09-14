@@ -42,7 +42,8 @@ export interface HandlerContext {
   ) => void;
   modelProvider: () => ModelProviderChoice;
   model: () => string;
-  apiKey: (provider?: ModelProvider) => string | undefined;
+  apiKey: (provider?: ModelProvider, apiProvider?: string) => string | undefined;
+  apiProvider?: string;
   /** Whether this server instance supports LOCAL_ONLY channels. */
   isLocal: boolean;
 }
@@ -88,6 +89,7 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
       name: options?.name,
       model: options?.model ?? ctx.model(),
       provider: ctx.modelProvider().provider,
+      apiProvider: ctx.modelProvider().provider === 'pi' ? ctx.apiProvider : undefined,
     });
     // Register with the SessionManager so sendMessage can run turns.
     ctx.sessionManager.createSession({
@@ -97,6 +99,7 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
       model: session.model,
       workingDirectory: resolveWorkingDirectory(session),
       apiKey: ctx.apiKey(),
+      apiProvider: ctx.apiProvider,
     });
     return loadSessionHeader(root, session.id);
   });
@@ -118,8 +121,9 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
       const session = loadSession(root, sessionId);
       if (!session) throw new Error('Session not found');
       const provider = (session.provider ?? ctx.modelProvider().provider) as ModelProvider;
+      const apiProvider = session.apiProvider ?? (provider === 'pi' && session.model?.startsWith('claude-') ? 'anthropic' : ctx.apiProvider);
       ctx.sessionManager.createSession({ workspaceId, sessionId, provider, model: session.model ?? ctx.model(),
-        workingDirectory: resolveWorkingDirectory(session), apiKey: ctx.apiKey(provider), history: session.messages });
+        workingDirectory: resolveWorkingDirectory(session), apiKey: ctx.apiKey(provider, apiProvider), apiProvider, history: session.messages });
     }
     return ctx.sessionManager.submitMessage({ workspaceId, sessionId, message, requestId,
       broadcast: event => ctx.broadcast({ to: 'workspace', workspaceId }, RPC_CHANNELS.session.EVENT, { workspaceId, sessionId, event }),

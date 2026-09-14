@@ -41,6 +41,8 @@ export interface SessionConfig {
   thinkingLevel?: string;
   /** Backend provider for this session ('anthropic' | 'pi') */
   provider?: string;
+  /** Upstream API provider for SDK backends; persisted independently of defaults. */
+  apiProvider?: string;
   /** Archive marker — archived sessions keep their data */
   isArchived?: boolean;
   archivedAt?: number;

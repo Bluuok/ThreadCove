@@ -109,7 +109,7 @@ export function listSessionIds(workspaceRootPath: string): string[] {
  */
 export async function createSession(
   workspaceRootPath: string,
-  options?: { id?: string; name?: string; model?: string; thinkingLevel?: string; provider?: string },
+  options?: { id?: string; name?: string; model?: string; thinkingLevel?: string; provider?: string; apiProvider?: string },
 ): Promise<StoredSession> {
   const existing = listSessionIds(workspaceRootPath);
   const id = options?.id ?? generateUniqueSessionId(existing);
@@ -127,6 +127,7 @@ export async function createSession(
     model: options?.model,
     thinkingLevel: options?.thinkingLevel,
     provider: options?.provider,
+    apiProvider: options?.apiProvider,
     workingDirectory: sessionDir,
     isFlagged: false,
     isArchived: false,

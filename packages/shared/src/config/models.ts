@@ -82,6 +82,14 @@ export const DEFAULT_MODELS: Record<ModelProvider, string> = {
  */
 export const MODEL_REGISTRY: ModelDefinition[] = [
   {
+    id: 'deepseek-v4.1-flash',
+    name: 'DeepSeek V4.1 Flash · OpenCode Go',
+    provider: 'pi',
+    contextWindow: 1_000_000,
+    supportsThinking: true,
+    supportsImages: true,
+  },
+  {
     id: 'claude-opus-4-8',
     name: 'Opus 4.8',
     provider: 'anthropic',

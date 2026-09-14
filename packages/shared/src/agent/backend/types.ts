@@ -199,6 +199,8 @@ export interface BackendConfig {
   permissionMode?: PermissionMode;
   /** API key (injected post-creation, never logged) */
   apiKey?: string;
+  /** Upstream API provider when an SDK backend supports multiple services. */
+  apiProvider?: string;
 }
 
 // ============================================================
