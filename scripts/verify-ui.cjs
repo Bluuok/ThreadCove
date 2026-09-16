@@ -59,9 +59,12 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   backend = await startBackend(rpcPort, env);
   browser = await chromium.launch({ headless:true });
   const page = await browser.newPage({ viewport:{width:1440,height:1000} });
+  await page.addInitScript(() => { window.__runAnimations = []; document.addEventListener('animationstart', event => { if (event.animationName.startsWith('research-')) window.__runAnimations.push(event.animationName); }); });
+  let injectEvent;
   let holdFileReads = false;
   const heldFileResponses = [], delayedReadIds = new Set();
   await page.routeWebSocket(`ws://127.0.0.1:${rpcPort}`, route => {
+    injectEvent = (sessionId, event) => route.send(JSON.stringify({ id: `qa-${Date.now()}`, type: 'event', channel: 'session:event', args: [{ sessionId, event }] }));
     const server = route.connectToServer();
     route.onMessage(message => {
       const envelope = JSON.parse(String(message));
@@ -84,7 +87,11 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   await page.getByText('这是本地验收服务的第一段。', { exact:true }).waitFor();
   await idle(page);
   await page.getByText('完整回答：历史与模型配置均已接入真实应用。', { exact:false }).first().waitFor();
+  await page.waitForFunction(() => window.__runAnimations.filter(n => n === 'research-finish').length === 1);
   const firstSession = readdirSync(join(data, 'sessions'))[0];
+  const firstAnswer = readFileSync(join(data, 'sessions', firstSession, 'session.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line)).find(message => message.type === 'assistant');
+  assert(firstAnswer);
+  await require('./verify-run-motion.cjs')(page, event => injectEvent(firstSession, event), firstAnswer);
   writeFileSync(join(data, 'sessions', firstSession, 'data', 'evidence.txt'), 'SESSION_A_FILE_CONTENT');
   await page.getByRole('button', { name:'执行详情' }).click();
   await page.getByRole('button', { name:/evidence.txt/ }).click();
@@ -126,16 +133,20 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   await page.getByRole('dialog').waitFor({ state:'hidden' });
   await send(page, '开始慢速回答，用于验证停止');
   await page.getByText('慢速研究已经开始。', { exact:true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.run-indicator')?.dataset.state === 'running');
   await page.getByRole('button', { name:'停止', exact:false }).click();
   await idle(page);
   assert(!await page.getByText('这段内容不应该在取消后出现。', { exact:false }).count());
   await page.reload();
   await page.getByText('慢速研究已经开始。', { exact:true }).waitFor();
   await stopChild(backend);
+  await page.waitForFunction(() => document.querySelector('.run-indicator')?.dataset.state === 'disconnected');
   backend = await startBackend(rpcPort, env);
   await page.waitForFunction(() => Boolean(document.querySelector('.connection i.online')), { timeout:20000 });
+  assert.equal(await page.evaluate(() => window.__runAnimations.filter(n => n === 'research-finish').length), 0, 'reconnecting must not celebrate restored history');
   await send(page, '我之前的口令是什么？');
   await idle(page);
+  await page.waitForFunction(() => window.__runAnimations.filter(n => n === 'research-finish').length === 1);
   assert.equal(requests.at(-1).model, 'mock-model-b');
   assert(requests.at(-1).messages.some(m => m.content.includes('COVE-7429')));
   await page.setViewportSize({width:390,height:844});

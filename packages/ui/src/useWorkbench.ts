@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentEvent, StoredMessage } from '@threadcove/core/types';
 import type { SessionDto, SourceDto } from '@threadcove/shared/protocol';
 import type { ElectronAPI, TransportConnectionState } from '@threadcove/shared/client';
+import type { RunFeedback } from './components/RunIndicator.tsx';
 
 export const connectionNames: Record<TransportConnectionState, string> = { idle: '等待连接', connecting: '正在连接', connected: '已连接', reconnecting: '正在重连', disconnected: '已断开', failed: '连接失败' };
 export const runNames: Record<string, string> = { running: '研究中', completed: '已完成', failed: '执行失败', cancelled: '已停止', interrupted: '执行已中断' };
@@ -30,6 +31,9 @@ export function useWorkbench(api: ElectronAPI) {
   const [filePreview, setFilePreview] = useState<{ name: string; content: string }>();
   const [activity, setActivity] = useState<string[]>([]);
   const [permission, setPermission] = useState<Extract<AgentEvent, { type: 'permission_request' }>['request']>();
+  const [runFeedback, setRunFeedback] = useState<RunFeedback>();
+  const observedRun = useRef<string>();
+  const connected = useRef(connection === 'connected');
   const liveId = useRef<string>();
   const loadSequence = useRef(0);
   const fileSequence = useRef(0);
@@ -81,7 +85,11 @@ export function useWorkbench(api: ElectronAPI) {
       if (!selectedRef.current) setSelected(result.find(session => !session.isArchived)?.id ?? '');
       else await loadMessages(selectedRef.current);
     };
-    const off = api.onConnectionStateChanged(state => { setConnection(state); if (state === 'connected') void load().catch(report); });
+    const off = api.onConnectionStateChanged(state => {
+      connected.current = state === 'connected';
+      observedRun.current = undefined; setRunFeedback(undefined);
+      setConnection(state); if (state === 'connected') void load().catch(report);
+    });
     const offEvents = api.onSessionEvent(raw => {
       const { sessionId, event } = raw as Incoming;
       if (event.type === 'user_message') {
@@ -94,6 +102,10 @@ export function useWorkbench(api: ElectronAPI) {
       if (sessionId !== selectedRef.current) return;
       revision.current++;
       if (event.type === 'user_message') {
+        if (connected.current) {
+          observedRun.current = event.message.runId;
+          setRunFeedback({ sessionId, runId: event.message.runId ?? event.message.id, status: 'running' });
+        }
         setMessages(current => current.some(message => message.id === event.message.id) ? current : [...current, event.message]);
         setActivity([]); setError('');
       } else if (event.type === 'text_delta' || event.type === 'text_complete') {
@@ -106,6 +118,14 @@ export function useWorkbench(api: ElectronAPI) {
           return index === -1 ? [...current, next] : current.map((message, i) => i === index ? next : message);
         });
       } else if (event.type === 'run_status') {
+        if (connected.current) {
+          const completion = event.status === 'completed' && observedRun.current === event.runId ? event.runId : undefined;
+          // Reject a late terminal event from a previous run for presentation purposes.
+          if (!observedRun.current || observedRun.current === event.runId || event.status === 'running') {
+            observedRun.current = event.status === 'running' ? event.runId : undefined;
+            setRunFeedback(previous => previous?.runId === event.runId && previous.status === event.status ? previous : { sessionId, runId: event.runId, status: event.status, completion });
+          }
+        }
         setPermission(undefined);
         if (event.error) setError(event.error);
         void loadMessages(sessionId).catch(report);
@@ -121,6 +141,7 @@ export function useWorkbench(api: ElectronAPI) {
   useEffect(() => {
     selectedRef.current = selected;
     liveId.current = undefined;
+    observedRun.current = undefined; setRunFeedback(undefined);
     revision.current++;
     fileSequence.current++;
     setMessages([]); setError(''); setActivity([]); setPermission(undefined); setFilePreview(undefined);
@@ -216,6 +237,7 @@ export function useWorkbench(api: ElectronAPI) {
   return {
     connection, workspace, selected, messages, draft, search, archived, details, sidebar, settings,
     compact, model, error, submitting, sources, files, filePreview, activity, permission,
+    runFeedback: runFeedback?.sessionId === selected ? runFeedback : undefined,
     scroll, stick, active, busy, online, visible, report, refresh, updateDraft, createTask, send, archive,
     openFile, saveModel, respondPermission, cancel,
     setSelected, setSearch, setArchived, setDetails, setSidebar, setSettings, setModel, setError,
