@@ -26,6 +26,7 @@ import type { ModelProvider, ThinkingLevel, PermissionMode } from '@threadcove/s
 import { getContextWindowForModel } from '@threadcove/shared/config';
 import type { McpClientPool } from '@threadcove/shared/mcp';
 import type { PiAgent } from '@threadcove/shared/agent';
+import { RESEARCH_PROMPT, type ResearchTools } from '@threadcove/shared/research';
 
 export interface SessionManagerOptions {
   server: WsRpcServer | null;
@@ -59,6 +60,7 @@ export class SessionManager {
     private readonly getWorkspaceRoot: SessionManagerOptions['getWorkspaceRoot'],
     private readonly mcpPool: McpClientPool | null = null,
     private readonly createBackendFn: SessionManagerOptions['createBackendFn'] = createBackend,
+    private readonly researchTools: ResearchTools | null = null,
   ) {}
 
   /** Register a workspace root (normally loaded from R08 workspace storage). */
@@ -70,6 +72,7 @@ export class SessionManager {
 
   async recoverWorkspace(root: string): Promise<void> {
     for (const header of listSessionHeaders(root, true)) {
+      this.researchTools?.recoverSession(root, header.id);
       if (header.lastRun?.status === 'running') await mutateSession(root, header.id, session => {
         session.lastRun = { ...header.lastRun!, status: 'interrupted' };
       });
@@ -111,15 +114,24 @@ export class SessionManager {
       permissionMode: opts.permissionMode,
       apiKey: opts.apiKey,
       apiProvider: opts.apiProvider,
+      ...(this.researchTools && opts.provider === 'pi' ? { systemPrompt: RESEARCH_PROMPT, runTimeoutMs: 180_000, maxModelTurns: 12 } : {}),
     };
 
     const backend = this.createBackendFn?.(config) ?? createBackend(config);
     backend.restoreHistory?.(opts.history ?? []);
-    if (this.mcpPool && 'setToolExecutor' in backend) {
+    if (this.researchTools && opts.provider === 'pi' && 'setToolDefinitions' in backend) {
+      const research = this.researchTools.bind(config, () => backend.getModel());
+      const mcpDefs = this.mcpPool?.getProxyToolDefs() ?? [];
+      (backend as PiAgent).setToolDefinitions([...research.definitions, ...mcpDefs.map(def => ({ name: def.name, description: def.description ?? def.name, parameters: def.inputSchema }))]);
+      (backend as PiAgent).setToolExecutor((name, args, signal) => {
+        if (mcpDefs.some(def => def.name === name)) return this.mcpPool!.callTool(name, args, signal);
+        return research.execute(name, args, signal);
+      });
+    } else if (this.mcpPool && 'setToolExecutor' in backend) {
       // Pi subprocess executes source tools via the host pool —
       // credentials never enter the subprocess.
-      (backend as PiAgent).setToolExecutor(async (toolName, args) =>
-        this.mcpPool!.callTool(toolName, args),
+      (backend as PiAgent).setToolExecutor(async (toolName, args, signal) =>
+        this.mcpPool!.callTool(toolName, args, signal),
       );
     }
 

@@ -15,6 +15,7 @@
     "./credentials": "./src/credentials/index.ts",
     "./skills": "./src/skills/index.ts",
     "./mcp": "./src/mcp/index.ts",
+    "./research": "./src/research/index.ts",
     "./config": "./src/config/index.ts",
     "./client": "./src/client/index.ts",
     "./client/*": "./src/client/*.ts"
@@ -25,6 +26,7 @@
   },
   "dependencies": {
     "@threadcove/core": "workspace:*",
+    "linkedom": "0.18.12",
     "zod": "^4.0.0"
   },
   "peerDependencies": {

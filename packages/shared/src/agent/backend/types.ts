@@ -201,6 +201,10 @@ export interface BackendConfig {
   apiKey?: string;
   /** Upstream API provider when an SDK backend supports multiple services. */
   apiProvider?: string;
+  systemPrompt?: string;
+  runTimeoutMs?: number;
+  maxOutputTokens?: number;
+  maxModelTurns?: number;
 }
 
 // ============================================================

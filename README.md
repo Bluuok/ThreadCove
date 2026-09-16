@@ -197,8 +197,8 @@ event    { id, type:'event',    channel:'session:event', args:[{ sessionId, even
 - **不做**：RAG/向量库（主打实时抓取+多源核对）、多 Agent 编排（多任务=多 Session）、Memory/跨任务知识复用、完整 OAuth（凭据手动粘贴，只留 `getToken` 钩子）
 - **MCP 只到统一转换层**：官方 SDK Client + 代理工具组装，不自研 JSON-RPC/握手
 - WebUI 定位是「验证同一套逻辑能否复用」的接续查看面，不是全功能第二产品
-- Pi 后端已接入真实 `createAgentSession`，默认仅允许显式注册的宿主工具；搜索服务和多 Agent 编排仍需另外接线
-- 当前验证：146 项测试通过，5 项 DeepSeek 直连 live 测试跳过；另有真实 OpenCode Go API / Pi SDK / Web / Electron 验收。1M 上下文为模型配置能力，尚未实测满窗口
+- Pi 后端已接入真实 `createAgentSession`，默认注册免密钥搜索、公开网页读取及最多 3 个并发子任务；详见[研究工具与预算](docs/RESEARCH-TOOLS.md)
+- 已有真实 OpenCode Go API / Pi SDK / Web / Electron 验收，以及两个真实子任务搜索、读取、来源落盘和刷新恢复验证。自动测试不使用个人 API 密钥，DeepSeek 直连 live 测试默认跳过；1M 上下文尚未实测满窗口
 
 ## License
 

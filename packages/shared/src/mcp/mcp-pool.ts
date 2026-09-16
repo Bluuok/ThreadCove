@@ -154,6 +154,7 @@ export class McpClientPool {
   async callTool(
     proxyName: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{ content: string; isError: boolean }> {
     const mapping = this.proxyTools.get(proxyName);
     if (!mapping) {
@@ -167,7 +168,7 @@ export class McpClientPool {
       const result = await entry.client.callTool({
         name: mapping.originalName,
         arguments: args,
-      });
+      }, undefined, { signal, timeout: 25_000 });
       const contentBlocks = (result.content ?? []) as Array<{ type: string; text?: string }>;
       const text = contentBlocks
         .map((block) => (block.type === 'text' && block.text ? block.text : ''))

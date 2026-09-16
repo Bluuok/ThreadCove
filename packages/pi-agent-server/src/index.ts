@@ -10,6 +10,7 @@ export interface InitMessage {
   thinkingLevel: string; sessionId: string; workspaceId?: string; sessionPath: string;
   workingDirectory: string; systemPrompt?: string;
   history?: Array<{ type: string; content: string }>;
+  maxOutputTokens?: number; maxModelTurns?: number;
 }
 export type InboundMessage = InitMessage
   | { type: 'prompt'; id: string; message: string; model?: string; thinkingLevel?: string; systemPrompt?: string }
@@ -32,6 +33,7 @@ let tools: ProxyToolDef[] = [];
 let promptId: string | undefined;
 let serial = Promise.resolve();
 let counter = 0;
+let modelTurns = 0;
 const cancelledPrompts = new Set<string>();
 const pending = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void; reject: (error: Error) => void }>();
 function thinkingLevel(value: string) { return value === 'off' ? 'off' : value === 'low' ? 'low' : value === 'max' || value === 'xhigh' ? 'max' : value === 'high' ? 'high' : 'medium'; }
@@ -81,7 +83,10 @@ async function initialize(msg: InitMessage): Promise<void> {
     thinkingLevel: thinkingLevel(msg.thinkingLevel), settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(msg.cwd),
     noTools: 'builtin', tools: tools.map(tool => tool.name), customTools }));
   const streamFn = session.agent.streamFn;
-  session.agent.streamFn = (m, context, options) => streamFn(m, context, { ...options, maxTokens: 8192 });
+  session.agent.streamFn = (m, context, options) => {
+    if (++modelTurns > Math.min(24, msg.maxModelTurns ?? 12)) throw new Error('Model request budget exceeded');
+    return streamFn(m, context, { ...options, maxTokens: Math.min(8192, msg.maxOutputTokens ?? 8192) });
+  };
   session.agent.state.messages = (msg.history ?? []).filter(m => m.type === 'user' || m.type === 'assistant').map(m => m.type === 'user'
     ? { role: 'user', content: m.content, timestamp: Date.now() }
     : { role: 'assistant', content: [{ type: 'text', text: m.content }], api: model.api, provider: model.provider, model: model.id,
@@ -97,6 +102,7 @@ async function handle(msg: InboundMessage): Promise<void> {
       if (cancelledPrompts.delete(msg.id)) return;
       if (!session) throw new Error('Pi session is not initialized');
       promptId = msg.id;
+      modelTurns = 0;
       try {
         if (msg.thinkingLevel) session.setThinkingLevel(thinkingLevel(msg.thinkingLevel));
         if (msg.model && msg.model !== session.model?.id) {
