@@ -77,6 +77,7 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   page.on('pageerror', error => faults.push(error.message));
   await page.goto(`http://127.0.0.1:${webPort}/#server=${encodeURIComponent(`ws://127.0.0.1:${rpcPort}`)}&token=local-qa-token`);
   await page.getByRole('button', { name:'新建研究任务' }).waitFor();
+  await require('./verify-map-motion.cjs')(page, `http://127.0.0.1:${webPort}/#server=${encodeURIComponent(`ws://127.0.0.1:${rpcPort}`)}&token=local-qa-token`);
   await screenshot(page, 'web-desktop-empty.png');
   await page.getByRole('button', { name:'新建研究任务' }).click();
   await page.locator('.task.active').waitFor();
