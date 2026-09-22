@@ -23,9 +23,10 @@ import {
   resolveSessionFilePath,
   updateSessionConfig,
   validateSessionId,
+  readFilePreview,
 } from '@threadcove/shared/sessions';
 import { listSources } from '@threadcove/shared/sources';
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'fs';
+import { writeFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import type { ModelProvider } from '@threadcove/shared/config';
 import type { SessionManager } from './session-manager.ts';
@@ -229,7 +230,7 @@ export function registerHandlers(server: RpcServerLike, ctx: HandlerContext): vo
     // getSessionPath imported at module top (defense-in-depth sanitize inside)
     const file = resolveSessionFilePath(root, String(sessionId), String(subPath));
     if (!existsSync(file)) throw new Error(`File not found: ${String(subPath)}`);
-    return { content: readFileSync(file, 'utf-8') };
+    return readFilePreview(file);
   });
 
   server.handle(RPC_CHANNELS.files.WRITE, (...args: unknown[]) => {

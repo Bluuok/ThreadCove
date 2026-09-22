@@ -868,6 +868,12 @@ h2{
   font-size:12px
 }
 
+.file-preview-notice{
+  margin:6px 0;
+  font-size:11px;
+  color:var(--muted);
+}
+
 .file-preview pre{
   white-space:pre-wrap;
   overflow-wrap:anywhere

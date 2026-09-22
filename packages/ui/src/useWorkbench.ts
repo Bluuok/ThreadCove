@@ -3,9 +3,23 @@ import type { AgentEvent, StoredMessage } from '@threadcove/core/types';
 import type { SessionDto, SourceDto } from '@threadcove/shared/protocol';
 import type { ElectronAPI, TransportConnectionState } from '@threadcove/shared/client';
 import type { RunFeedback } from './components/RunIndicator.tsx';
+import {
+  accumulateStreamDelta,
+  applyPendingBatch,
+  BATCH_INTERVAL_MS,
+  type PendingStreamDelta,
+} from './streamBatcher.ts';
 
 export const connectionNames: Record<TransportConnectionState, string> = { idle: '等待连接', connecting: '正在连接', connected: '已连接', reconnecting: '正在重连', disconnected: '已断开', failed: '连接失败' };
 export const runNames: Record<string, string> = { running: '研究中', completed: '已完成', failed: '执行失败', cancelled: '已停止', interrupted: '执行已中断' };
+
+export interface FilePreviewState {
+  name: string;
+  content: string;
+  truncated?: boolean;
+  totalBytes?: number;
+  previewBytes?: number;
+}
 
 type RunEvent = { type: 'run_status'; status: string; error?: string; runId: string };
 type Incoming = { workspaceId?: string; sessionId: string; event: AgentEvent | RunEvent | { type: 'user_message'; message: StoredMessage } };
@@ -28,7 +42,7 @@ export function useWorkbench(api: ElectronAPI) {
   const [submitting, setSubmitting] = useState(false);
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [files, setFiles] = useState<Array<{ name: string; type: string }>>([]);
-  const [filePreview, setFilePreview] = useState<{ name: string; content: string }>();
+  const [filePreview, setFilePreview] = useState<FilePreviewState>();
   const [activity, setActivity] = useState<string[]>([]);
   const [permission, setPermission] = useState<Extract<AgentEvent, { type: 'permission_request' }>['request']>();
   const [runFeedback, setRunFeedback] = useState<RunFeedback>();
@@ -40,6 +54,8 @@ export function useWorkbench(api: ElectronAPI) {
   const selectedRef = useRef(selected);
   const workspaceRef = useRef(workspace);
   const revision = useRef(0);
+  const pendingDeltas = useRef<Map<string, PendingStreamDelta>>(new Map());
+  const batchTimer = useRef<ReturnType<typeof setTimeout>>();
   const pending = useRef<{ session: string; text: string; id: string }>();
   const scroll = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -71,6 +87,28 @@ export function useWorkbench(api: ElectronAPI) {
     }
   }, [api, report]);
 
+  const flushBatch = useCallback(() => {
+    if (batchTimer.current) {
+      clearTimeout(batchTimer.current);
+      batchTimer.current = undefined;
+    }
+    if (pendingDeltas.current.size === 0) return;
+    const batch = pendingDeltas.current;
+    pendingDeltas.current = new Map();
+    revision.current++;
+    if (mounted.current) {
+      setMessages(current => applyPendingBatch(current, batch));
+    }
+  }, []);
+
+  const cancelBatch = useCallback(() => {
+    if (batchTimer.current) {
+      clearTimeout(batchTimer.current);
+      batchTimer.current = undefined;
+    }
+    pendingDeltas.current = new Map();
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     let stopped = false;
@@ -88,6 +126,7 @@ export function useWorkbench(api: ElectronAPI) {
     const off = api.onConnectionStateChanged(state => {
       connected.current = state === 'connected';
       observedRun.current = undefined; setRunFeedback(undefined);
+      if (state !== 'connected') flushBatch();
       setConnection(state); if (state === 'connected') void load().catch(report);
     });
     const offEvents = api.onSessionEvent(raw => {
@@ -102,22 +141,28 @@ export function useWorkbench(api: ElectronAPI) {
       if (sessionId !== selectedRef.current) return;
       revision.current++;
       if (event.type === 'user_message') {
+        flushBatch();
         if (connected.current) {
           observedRun.current = event.message.runId;
           setRunFeedback({ sessionId, runId: event.message.runId ?? event.message.id, status: 'running' });
         }
         setMessages(current => current.some(message => message.id === event.message.id) ? current : [...current, event.message]);
         setActivity([]); setError('');
-      } else if (event.type === 'text_delta' || event.type === 'text_complete') {
-        const id = event.messageId ?? liveId.current ?? `live-${crypto.randomUUID()}`;
-        liveId.current = event.type === 'text_complete' ? undefined : id;
-        setMessages(current => {
-          const index = current.findIndex(message => message.id === id);
-          const previous = current[index];
-          const next: StoredMessage = { id, type: 'assistant', content: event.type === 'text_complete' ? event.text : event.textSnapshot ?? (previous?.content ?? '') + event.text, timestamp: previous?.timestamp ?? Date.now(), turnId: event.turnId };
-          return index === -1 ? [...current, next] : current.map((message, i) => i === index ? next : message);
-        });
+      } else if (event.type === 'text_delta') {
+        const id = accumulateStreamDelta(pendingDeltas.current, event, liveId.current ?? `live-${crypto.randomUUID()}`);
+        liveId.current = id;
+        if (!batchTimer.current) {
+          batchTimer.current = setTimeout(() => {
+            batchTimer.current = undefined;
+            flushBatch();
+          }, BATCH_INTERVAL_MS);
+        }
+      } else if (event.type === 'text_complete') {
+        accumulateStreamDelta(pendingDeltas.current, event, liveId.current ?? `live-${crypto.randomUUID()}`);
+        liveId.current = undefined;
+        flushBatch();
       } else if (event.type === 'run_status') {
+        flushBatch();
         if (connected.current) {
           const completion = event.status === 'completed' && observedRun.current === event.runId ? event.runId : undefined;
           // Reject a late terminal event from a previous run for presentation purposes.
@@ -129,16 +174,24 @@ export function useWorkbench(api: ElectronAPI) {
         setPermission(undefined);
         if (event.error) setError(event.error);
         void loadMessages(sessionId).catch(report);
-      } else if (event.type === 'typed_error') setError(event.error.message);
-      else if (event.type === 'error') setError(event.message);
-      else if (event.type === 'permission_request') { setPermission(event.request); setDetails(true); }
-      else if (event.type === 'tool_start' || event.type === 'tool_result') setActivity(current => [...current.slice(-29), `${event.type === 'tool_start' ? '正在执行' : '已返回'} · ${event.toolName}`]);
+      } else if (event.type === 'typed_error') {
+        flushBatch();
+        setError(event.error.message);
+      } else if (event.type === 'error') {
+        flushBatch();
+        setError(event.message);
+      } else if (event.type === 'permission_request') {
+        setPermission(event.request); setDetails(true);
+      } else if (event.type === 'tool_start' || event.type === 'tool_result') {
+        setActivity(current => [...current.slice(-29), `${event.type === 'tool_start' ? '正在执行' : '已返回'} · ${event.toolName}`]);
+      }
     });
     void api.ready().then(load).catch(report);
-    return () => { stopped = true; mounted.current = false; off(); offEvents(); };
-  }, [api, loadMessages, refresh, report]);
+    return () => { stopped = true; mounted.current = false; cancelBatch(); off(); offEvents(); };
+  }, [api, cancelBatch, flushBatch, loadMessages, refresh, report]);
 
   useEffect(() => {
+    cancelBatch();
     selectedRef.current = selected;
     liveId.current = undefined;
     observedRun.current = undefined; setRunFeedback(undefined);
@@ -149,7 +202,7 @@ export function useWorkbench(api: ElectronAPI) {
     setDraft(sessionStorage.getItem(`threadcove-draft:${workspace}:${selected}`) ?? '');
     stick.current = true;
     if (selected && workspace) void loadMessages(selected).catch(report);
-  }, [selected, workspace, loadMessages, report]);
+  }, [selected, workspace, cancelBatch, loadMessages, report]);
   useEffect(() => { if (active?.model) setModel(active.model); }, [active?.model]);
   useEffect(() => {
     if (stick.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
@@ -167,12 +220,14 @@ export function useWorkbench(api: ElectronAPI) {
     setDraft(value); sessionStorage.setItem(`threadcove-draft:${workspace}:${selected}`, value);
   }
   async function createTask() {
+    flushBatch();
     if (!online || !workspace || submitting) return;
     setSubmitting(true); setError('');
     try { const session = await api.createSession(workspace); await refresh(); setSelected(session.id); setSidebar(false); }
     catch (error) { report(error); } finally { setSubmitting(false); }
   }
   async function send() {
+    flushBatch();
     const text = draft.trim();
     if (!text || busy || !online) return;
     const submissionWorkspace = workspace;
@@ -211,7 +266,13 @@ export function useWorkbench(api: ElectronAPI) {
     setFilePreview(undefined);
     try {
       const result = await api.readFile(requestWorkspace, requestSession, name);
-      if (isCurrent()) setFilePreview({ name, content: result.content });
+      if (isCurrent()) setFilePreview({
+        name,
+        content: result.content,
+        truncated: result.truncated,
+        totalBytes: result.totalBytes,
+        previewBytes: result.previewBytes,
+      });
     } catch (error) { if (isCurrent()) report(error); }
   }
   async function saveModel() {
@@ -229,6 +290,7 @@ export function useWorkbench(api: ElectronAPI) {
     } catch (error) { report(error); }
   }
   async function cancel() {
+    flushBatch();
     try { await api.cancelProcessing(workspace, selected); } catch (error) { report(error); }
   }
 

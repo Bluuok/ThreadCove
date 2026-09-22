@@ -47,3 +47,22 @@ jobs:
 
       - name: Build WebUI and Electron
         run: bun run build
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Chromium motion smoke (web-only)
+        run: node scripts/verify-ui.cjs --web-only
+
+      - name: Upload QA artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-artifacts
+          path: artifacts/qa/
+          if-no-files-found: ignore

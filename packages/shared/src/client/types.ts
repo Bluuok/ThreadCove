@@ -50,7 +50,7 @@ export interface ElectronAPI {
 
   // Files (workspace content)
   listFiles(workspaceId: string, sessionId: string, subPath?: string): Promise<{ entries: unknown[] }>;
-  readFile(workspaceId: string, sessionId: string, subPath: string): Promise<{ content: string }>;
+  readFile(workspaceId: string, sessionId: string, subPath: string): Promise<FileReadResult>;
   writeFile(workspaceId: string, sessionId: string, subPath: string, content: string): Promise<{ success: boolean }>;
 
   // LOCAL_ONLY — native dialog (Electron only; WebUI overrides with input[type=file])
@@ -70,4 +70,12 @@ export type TransportConnectionState = 'idle' | 'connecting' | 'connected' | 're
 export interface SessionEventPayload {
   sessionId: string;
   event: AgentEvent | { type: 'user_message'; message: unknown };
+}
+
+/** Result shape for bounded file reading. */
+export interface FileReadResult {
+  content: string;
+  truncated?: boolean;
+  totalBytes?: number;
+  previewBytes?: number;
 }
