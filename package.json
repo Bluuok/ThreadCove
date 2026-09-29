@@ -12,6 +12,7 @@
   "scripts": {
     "test": "bun test",
     "test:ui": "node scripts/verify-ui.cjs",
+    "test:ui:web": "node scripts/verify-ui.cjs --web-only",
     "typecheck": "bun run typecheck:core && bun run typecheck:shared && bun run typecheck:pi-agent-server && bun run typecheck:electron && bun run typecheck:webui && bun run --cwd packages/ui typecheck",
     "typecheck:core": "cd packages/core && bun run typecheck",
     "typecheck:shared": "cd packages/shared && bun run typecheck",

@@ -7,7 +7,13 @@ type Props = {
   active?: SessionDto;
   sources: SourceDto[];
   files: Array<{ name: string; type: string }>;
-  filePreview?: { name: string; content: string };
+  filePreview?: {
+    name: string;
+    content: string;
+    truncated?: boolean;
+    totalBytes?: number;
+    previewBytes?: number;
+  };
   activity: string[];
   permission?: Permission;
   onClose: () => void;
@@ -20,6 +26,6 @@ export function DetailsPanel({ active, sources, files, filePreview, activity, pe
     {permission && <section className="panel-permission"><h3>等待你的允许</h3><p>{permission.description}</p><div><button onClick={() => onPermission(false)}>拒绝</button><button className="accent-button" onClick={() => onPermission(true)}>允许这次</button></div></section>}
     <section><h3>执行记录 <span>01</span></h3><div className="detail-status"><i className={active?.isProcessing ? 'working' : ''}/>{active?.isProcessing ? '正在研究' : runNames[active?.lastRun?.status ?? ''] ?? '等待问题'}</div>{activity.map((item, index) => <p className="activity" key={`${item}-${index}`}>{item}</p>)}{!activity.length && <p>工具调用发生时，会在这里显示。</p>}</section>
     <section><h3>资料源 <span>{String(sources.length).padStart(2, '0')}</span></h3>{sources.map(source => <div className="detail-row" key={source.slug}><span>{source.name}</span><small>{source.enabled ? '已配置' : '已停用'}</small></div>)}{!sources.length && <p>尚未配置资料源。</p>}</section>
-    <section><h3>任务文件 <span>{String(files.length).padStart(2, '0')}</span></h3>{files.map(file => <button className="file-row" key={file.name} disabled={file.type === 'directory'} onClick={() => onOpenFile(file.name)}><span>▤ {file.name}</span><small>{file.type === 'directory' ? '目录' : '打开 ↗'}</small></button>)}{!files.length && <p>任务资料目录中还没有文件。</p>}{filePreview && <div className="file-preview"><strong>{filePreview.name}</strong><pre>{filePreview.content}</pre></div>}</section>
+    <section><h3>任务文件 <span>{String(files.length).padStart(2, '0')}</span></h3>{files.map(file => <button className="file-row" key={file.name} disabled={file.type === 'directory'} onClick={() => onOpenFile(file.name)}><span>▤ {file.name}</span><small>{file.type === 'directory' ? '目录' : '打开 ↗'}</small></button>)}{!files.length && <p>任务资料目录中还没有文件。</p>}{filePreview && <div className="file-preview"><strong>{filePreview.name}</strong>{filePreview.truncated && <div className="file-preview-notice">文件较大，仅显示前 {Math.round((filePreview.previewBytes ?? 262144) / 1024)} KiB</div>}<pre>{filePreview.content}</pre></div>}</section>
   </aside>;
 }

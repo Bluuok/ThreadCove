@@ -6,7 +6,7 @@ const { join, resolve } = require('node:path');
 const { spawn } = require('node:child_process');
 const { chromium, _electron } = require('playwright');
 const root = resolve(__dirname, '..');
-const output = resolve(process.env.THREADCOVE_QA_OUTPUT || join(root, 'artifacts/qa'));
+const output = resolve(process.env.THREADCOVE_QA_OUTPUT || join(root, 'artifacts/qa/stability'));
 mkdirSync(output, { recursive: true });
 const data = mkdtempSync(join(tmpdir(), 'threadcove-ui-'));
 const requests = [];
@@ -94,9 +94,16 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   assert(firstAnswer);
   await require('./verify-run-motion.cjs')(page, event => injectEvent(firstSession, event), firstAnswer);
   writeFileSync(join(data, 'sessions', firstSession, 'data', 'evidence.txt'), 'SESSION_A_FILE_CONTENT');
+  const largePreviewData = Buffer.alloc(1200 * 1024, 65); // 1.2 MiB of 'A'
+  writeFileSync(join(data, 'sessions', firstSession, 'data', 'large.txt'), largePreviewData);
   await page.getByRole('button', { name:'执行详情' }).click();
   await page.getByRole('button', { name:/evidence.txt/ }).click();
   await page.getByText('SESSION_A_FILE_CONTENT', {exact:true}).waitFor();
+  await page.getByRole('button', { name:/large\.txt/ }).click();
+  await page.getByText('文件较大，仅显示前 256 KiB', {exact:false}).waitFor();
+  const previewLen = await page.locator('.file-preview pre').evaluate(el => el.textContent.length);
+  assert.equal(previewLen, 256 * 1024, 'preview text must be bounded to 256KiB');
+  assert.equal(readFileSync(join(data, 'sessions', firstSession, 'data', 'large.txt')).length, 1200 * 1024, 'full file on disk untouched');
   await screenshot(page, 'web-desktop-conversation.png');
   holdFileReads = true;
   await page.getByRole('button', { name:/evidence.txt/ }).click();
@@ -140,11 +147,24 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   assert(!await page.getByText('这段内容不应该在取消后出现。', { exact:false }).count());
   await page.reload();
   await page.getByText('慢速研究已经开始。', { exact:true }).waitFor();
+  // 1. Verify terminal + offline: cancelled run remains 'cancelled' when offline
   await stopChild(backend);
-  await page.waitForFunction(() => document.querySelector('.run-indicator')?.dataset.state === 'disconnected');
+  await page.waitForFunction(() => !document.querySelector('.connection i.online'));
+  assert.equal(await page.evaluate(() => document.querySelector('.run-indicator')?.dataset.state), 'cancelled', 'terminal state must be retained when offline');
   backend = await startBackend(rpcPort, env);
   await page.waitForFunction(() => Boolean(document.querySelector('.connection i.online')), { timeout:20000 });
   assert.equal(await page.evaluate(() => window.__runAnimations.filter(n => n === 'research-finish').length), 0, 'reconnecting must not celebrate restored history');
+
+  // 2. Verify running + offline: unfinished run shows 'disconnected' when offline
+  await send(page, '慢速断线状态验收测试');
+  await page.getByText('慢速研究已经开始。', { exact:false }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.run-indicator')?.dataset.state === 'running');
+  await stopChild(backend);
+  await page.waitForFunction(() => document.querySelector('.run-indicator')?.dataset.state === 'disconnected');
+  assert.equal(await page.evaluate(() => document.querySelector('.run-indicator')?.textContent?.trim()), '连接中断，执行状态待同步');
+  backend = await startBackend(rpcPort, env);
+  await page.waitForFunction(() => Boolean(document.querySelector('.connection i.online')), { timeout:20000 });
+  assert.equal(await page.evaluate(() => window.__runAnimations.filter(n => n === 'research-finish').length), 0, 'reconnecting must not celebrate interrupted run');
   await send(page, '我之前的口令是什么？');
   await idle(page);
   await page.waitForFunction(() => window.__runAnimations.filter(n => n === 'research-finish').length === 1);
@@ -192,26 +212,45 @@ async function idle(page) { await page.getByRole('button', { name: '开始研究
   await page.locator('#qa-long-error').evaluate(el => el.remove());
   await browser.close(); browser = undefined;
   await stopChild(backend);
-  const electronExe = require(require.resolve('electron', { paths:[join(root,'apps/electron')] }));
-  electron = await _electron.launch({ executablePath:electronExe, args:[join(root,'apps/electron')], env, timeout:25000 });
-  const desktop = await electron.firstWindow();
-  desktop.on('pageerror', error => faults.push(error.message));
-  await desktop.getByRole('button',{name:'新建研究任务'}).waitFor({timeout:20000});
-  await desktop.getByRole('button',{name:'新建研究任务'}).click();
-  await desktop.locator('.task.active').waitFor();
-  await send(desktop,'Electron 实际窗口发送验收');
-  await idle(desktop);
-  await desktop.getByText('完整回答：历史与模型配置均已接入真实应用。',{exact:false}).first().waitFor();
-  await screenshot(desktop,'electron-conversation.png');
-  await send(desktop,'Electron 慢速取消验收');
-  await desktop.getByText('慢速研究已经开始。',{exact:true}).waitFor();
-  await desktop.getByRole('button',{name:'停止',exact:false}).click();
-  await idle(desktop);
-  await desktop.reload();
-  await desktop.getByText('慢速研究已经开始。',{exact:true}).waitFor();
+  const isWebOnly = process.argv.includes('--web-only') || process.env.THREADCOVE_WEB_ONLY === '1';
+  if (!isWebOnly) {
+    const electronExe = require(require.resolve('electron', { paths:[join(root,'apps/electron')] }));
+    electron = await _electron.launch({ executablePath:electronExe, args:[join(root,'apps/electron')], env, timeout:25000 });
+    const desktop = await electron.firstWindow();
+    desktop.on('pageerror', error => faults.push(error.message));
+    await desktop.getByRole('button',{name:'新建研究任务'}).waitFor({timeout:20000});
+    await desktop.getByRole('button',{name:'新建研究任务'}).click();
+    await desktop.locator('.task.active').waitFor();
+    await send(desktop,'Electron 实际窗口发送验收');
+    await idle(desktop);
+    await desktop.getByText('完整回答：历史与模型配置均已接入真实应用。',{exact:false}).first().waitFor();
+    await screenshot(desktop,'electron-conversation.png');
+    await send(desktop,'Electron 慢速取消验收');
+    await desktop.getByText('慢速研究已经开始。',{exact:true}).waitFor();
+    await desktop.getByRole('button',{name:'停止',exact:false}).click();
+    await idle(desktop);
+    await desktop.reload();
+    await desktop.getByText('慢速研究已经开始。',{exact:true}).waitFor();
+  }
   assert.equal(faults.length, 0, faults.join('\n'));
-  writeFileSync(join(output,'verification.json'),JSON.stringify({passed:true,web:true,electron:true,mobileWidth:390,requests:requests.length,modelSwitch:true,restartHistory:true,stoppedPartialSaved:true,fileRpc:true,staleFileResponseIgnored:true,taskDraftIsolation:true,archiveRestore:true,consoleErrors:faults},null,2));
-  console.log(JSON.stringify({passed:true,output,requests:requests.length}));
+  writeFileSync(join(output,'verification.json'),JSON.stringify({
+    passed:true,
+    web:true,
+    electron:!isWebOnly,
+    mobileWidth:390,
+    requests:requests.length,
+    modelSwitch:true,
+    restartHistory:true,
+    stoppedPartialSaved:true,
+    fileRpc:true,
+    staleFileResponseIgnored:true,
+    taskDraftIsolation:true,
+    archiveRestore:true,
+    fileTruncationTested:true,
+    offlineTerminalTested:true,
+    consoleErrors:faults
+  },null,2));
+  console.log(JSON.stringify({passed:true,output,requests:requests.length,webOnly:isWebOnly}));
 })().catch(error => { console.error(error); process.exitCode=1; }).finally(async () => {
   if (browser) await browser.close().catch(()=>{});
   if (electron) await electron.close().catch(()=>{});
